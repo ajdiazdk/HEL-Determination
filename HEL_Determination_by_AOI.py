@@ -204,6 +204,7 @@ def setScratchWorkspace():
                     AddMsgAndPrint("\tTemporarily setting scratch workspace to: " + arcpy.env.scratchGDB,1)
 
                 else:
+                    AddMsgAndPrint("\tCould not set scratchWorkspace. Not even to default!",2)
                     return False
 
         arcpy.Compact_management(arcpy.env.scratchGDB)
@@ -225,6 +226,18 @@ def setScratchWorkspace():
             errorMsg()
             return False
 
+# ===============================================================================================================
+def splitThousands(someNumber):
+# will determine where to put a thousands seperator if one is needed.
+# Input is an integer.  Integer with or without thousands seperator is returned.
+
+    try:
+        return re.sub(r'(\d{3})(?=\d)', r'\1,', str(someNumber)[::-1])[::-1]
+
+    except:
+        errorMsg()
+        return someNumber
+
 ## =============================================== Main Body ====================================================
 
 import sys, string, os, locale, traceback, urllib, re, arcpy, operator, getpass
@@ -234,22 +247,81 @@ from arcpy.sa import *
 if __name__ == '__main__':
 
     AOI = arcpy.GetParameter(0)
-    helLayer = arcpy.GetParameter(0)
-    cluLayer = arcpy.GetParameter(1)
-    inputDEM = arcpy.GetParameter(2)
-    zUnits = arcpy.GetParameterAsText(3)
+    helLayer = arcpy.GetParameter(1)
+    cluLayer = arcpy.GetParameter(2)
+    inputDEM = arcpy.GetParameter(3)
+    zUnits = arcpy.GetParameterAsText(4)
+    kFactorFld = arcpy.GetParameterAsText(5)
+    tFactorFld = arcpy.GetParameterAsText(6)
+    rFactorFld = arcpy.GetParameterAsText(7)
 
     helSummary = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.mdb\HEL_Determinations\HELSummaryLayer'
     helYes = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.mdb\HEL_Determinations\HELSummaryLayer'
 
-    # ---------------------------------------------------------------------------------------------- Check DEM Coordinate System and Linear Units
-    AddMsgAndPrint("\nGathering information about DEM: " + os.path.basename(inputDEM)+ ":")
+    """ ---------------------------------------------------------------------------------------------- Routine Shit"""
+    # Check Availability of Spatial Analyst Extension
+    try:
+        if arcpy.CheckExtension("Spatial") == "Available":
+            arcpy.CheckOutExtension("Spatial")
+        else:
+            raise ExitError,"\n\nSpatial Analyst license is unavailable.  May need to turn it on!"
+
+    except LicenseError:
+        AddMsgAndPrint("\n\nSpatial Analyst license is unavailable.  May need to turn it on!",2)
+        exit()
+    except arcpy.ExecuteError:
+        AddMsgAndPrint(arcpy.GetMessages(2),2)
+        exit()
+
+    # Set overwrite option
+    arcpy.env.overwriteOutput = True
+
+    # define and set the scratch workspace
+    scratchWS = setScratchWorkspace()
+    arcpy.env.scratchWorkspace = scratchWS
+
+    if not scratchWS:
+        exit()
+
+    """ ---------------------------------------------------------------------------------------------- Prepare CLU Layer"""
+    descAOI = arcpy.Describe(AOI)
+    aoiPath = descAOI.catalogPath
+    cluLayerPath = arcpy.Describe(cluLayer).catalogPath
+    cluAOI = arcpy.CreateScratchName("cluAOI",data_type="FeatureClass",workspace=scratchWS)
+
+    # AOI is digitized and resides in memory; Clip CLU based on the user-digitized polygon.
+    if descAOI.dataType.upper() == "FEATURERECORDSETLAYER":
+        AddMsgAndPrint("\nClipping the CLU layer to the manually digitized AOI")
+        arcpy.Clip_analysis(cluLayer,AOI,cluAOI)
+
+    # AOI is some existing feature.  Not digitized.
+    else:
+        # AOI came from the CLU
+        if aoiPath == cluLayerPath:
+            AddMsgAndPrint("\nUsing " + str(int(arcpy.GetCount_management(AOI).getOutput(0))) + " features from the CLU Layer as AOI")
+            cluAOI = arcpy.CopyFeatures_management(AOI,cluAOI)
+        else:
+            AddMsgAndPrint("\nClipping the CLU layer to the manually digitized AOI")
+            arcpy.Clip_analysis(cluLayer,AOI,cluAOI)
+
+    # Update Acres - Add Calcacre field if it doesn't exist.
+    calcAcreFld = "CALCACRES"
+    if not len(arcpy.ListFields(cluAOI,calcAcreFld)) > 0:
+        arcpy.AddField_management(cluAOI,calcAcreFld,"DOUBLE")
+
+    arcpy.CalculateField_management(cluAOI,calcAcreFld,"!shape.area@acres!","PYTHON_9.3")
+    totalAcres = float("%.1f" % (sum([row[0] for row in arcpy.da.SearchCursor(cluAOI, (calcAcreFld))])))
+    AddMsgAndPrint("\tTotal Acres: " + splitThousands(totalAcres))
+
+    """ ---------------------------------------------------------------------------------------------- Check DEM Coordinate System and Linear Units"""
 
     desc = arcpy.Describe(inputDEM)
+    inputDEMPath = desc.catalogPath
     sr = desc.SpatialReference
-
     units = sr.LinearUnitName
     cellSize = desc.MeanCellWidth
+
+    AddMsgAndPrint("\nGathering information about DEM: \"" + os.path.basename(inputDEMPath) + "\"")
 
     if units == "Meter":
         units = "Meters"
@@ -282,7 +354,7 @@ if __name__ == '__main__':
 
         # z units and XY units are the same thus no conversion is required (Feet is assumed here)
         else:
-            Zfactor = 1
+            Zfactor = 1.0
 
         AddMsgAndPrint("\tProjection Name: " + sr.Name,0)
         AddMsgAndPrint("\tXY Linear Units: " + units,0)
@@ -293,15 +365,25 @@ if __name__ == '__main__':
         AddMsgAndPrint("\n\n\t" + os.path.basename(inputDEM) + " is NOT in a projected Coordinate System....EXITING",2)
         exit()
 
-    """ ---------------------------------------------------------------------------------------------- Buffer CLU Layer by 300 Meters"""
-    AddMsgAndPrint("\nBuffering " + cluLayer + " 300 Meters")
+    """ ---------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
+    AddMsgAndPrint("\nBuffering AOI by 300 Meters")
     cluBuffer = arcpy.CreateScratchName("cluBuffer",data_type="FeatureClass",workspace=scratchWS)
-    arcpy.Buffer_analysis(cluLayer,cluBuffer,"300 Meters","FULL","ROUND","PLANAR")
+    arcpy.Buffer_analysis(cluAOI,cluBuffer,"300 Meters","FULL","ROUND")
+
+    """ ---------------------------------------------------------------------------------------------- Intersect Soils (HEL) with CLU (AOI) and configure"""
+    AddMsgAndPrint("\nIntersecting Soils and AOI")
+    aoiCluIntersect = arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS)
+    arcpy.Intersect_analysis([cluAOI,helLayer],aoiCluIntersect,"ALL")
+
+    HELvalueFld = "HELValue"
+    if not len(arcpy.ListFields(aoiCluIntersect,HELvalueFld)) > 0:
+        AddMsgAndPrint("\tAdding 'HELValue' field")
+        arcpy.AddField_management(aoiCluIntersect,HELvalueFld,"SHORT")
 
     """ ---------------------------------------------------------------------------------------------- Extract DEM using CLU layer"""
     AddMsgAndPrint("\nExtracting DEM subset using buffered CLU layer")
     demExtract = arcpy.CreateScratchName("demExtract",data_type="RasterDataset",workspace=scratchWS)
-    outExtractMask = ExtractByMask(inputDEM,demExtract)
+    outExtractMask = ExtractByMask(inputDEM,cluAOI)
     outExtractMask.save(demExtract)
 
     """----------------------------------------------------------------------------------------------  Create Slope Layer"""
@@ -324,9 +406,9 @@ if __name__ == '__main__':
     # convert Flow Length distance units to feet if original DEM is not in feet.
     if not units == ("Feet"):
         AddMsgAndPrint("\tConverting Flow Length Distance units to Feet")
-        flowLengthFT = arcpy.CreateScratchName("flowLength",data_type="RasterDataset",workspace=scratchWS)
-        outFlowLengthFT = flowLength * Zfactor
-        outFlowLengthFT.save(flowLengthFT)
+        flowLengthFT = arcpy.CreateScratchName("flowLength_FT",data_type="RasterDataset",workspace=scratchWS)
+        outflowLengthFT = Raster(flowLength) * Zfactor
+        outflowLengthFT.save(flowLengthFT)
 
     else:
         flowLengthFT = flowLength
@@ -335,7 +417,9 @@ if __name__ == '__main__':
     # Calculate S Factor
     # ((0.065 +( 0.0456 * ("%slope%"))) +( 0.006541 * (Power("%slope%",2))))
     AddMsgAndPrint("\nCalculating S Factor")
-    sFactor = (Power(slope,2) * 0.006541) + ((slope * 0.0456) + 0.065)
+    sFactor = arcpy.CreateScratchName("sFactor",data_type="RasterDataset",workspace=scratchWS)
+    outsFactor = (Power(slope,2) * 0.006541) + ((Raster(slope) * 0.0456) + 0.065)
+    outsFactor.save(sFactor)
 
     # Calculate L Factor
     # Con("%slope%" < 1,Power("%FlowLenft%" / 72.5,0.2) ,Con(("%slope%" >=  1) &("%slope%" < 3) ,Power("%FlowLenft%" / 72.5,0.3), Con(("%slope%" >= 3) &("%slope%" < 5 ),Power("%FlowLenft%" / 72.5,0.4) ,Power("%FlowLenft%" / 72.5,0.5))))
@@ -344,11 +428,33 @@ if __name__ == '__main__':
     # 3) 3 < slope < 5  --  Power 0.4
     # 4) slope > 5      --  Power 0.5
     AddMsgAndPrint("\nCalculating L Factor")
-    lFactor = Con(slope < 1,Power(flowLengthFT / 72.5,0.2),Con((slope >=  1) & (slope < 3), Power(flowLengthFT / 72.5,0.3), Con((slope >= 3) & (slope < 5 ), Power(flowLengthFT / 72.5,0.4), Power(flowLengthFT / 72.5,0.5))))
+    lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
+    outlFactor = Con(slope < 1,Power(Raster(flowLengthFT) / 72.5,0.2),Con((slope >=  1) & (slope < 3), Power(Raster(flowLengthFT) / 72.5,0.3), Con((slope >= 3) & (slope < 5 ), Power(Raster(flowLengthFT) / 72.5,0.4), Power(Raster(flowLengthFT) / 72.5,0.5))))
+    outlFactor.save(lFactor)
 
     # Calculate LS Factor
     # "%l_factor%" * "%s_factor%"
     AddMsgAndPrint("Calculating LS Factor")
-    lsFactor = lFactor * sFactor
+    lsFactor = arcpy.CreateScratchName("lsFactor",data_type="RasterDataset",workspace=scratchWS)
+    outlsFactor = lFactor * sFactor
+    outlsFactor.save(lsFactor)
 
+    """---------------------------------------------------------------------------------------------- Convert K,T & R Factor to Rasters """
+    kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
+    tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
+    rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
+
+    AddMsgAndPrint("\nConverting K Factor field to a raster")
+    arcpy.FeatureToRaster_conversion(aoiCluIntersect,kFactorFld,kFactor,cellSize)
+
+    AddMsgAndPrint("\nConverting T Factor field to a raster")
+    arcpy.FeatureToRaster_conversion(aoiCluIntersect,tFactorFld,tFactor,cellSize)
+
+    AddMsgAndPrint("\nConverting R Factor field to a raster")
+    arcpy.FeatureToRaster_conversion(aoiCluIntersect,rFactorFld,rFactor,cellSize)
+
+    """---------------------------------------------------------------------------------------------- Calculate EI Factor"""
+    AddMsgAndPrint("\nCalculating EI Factor")
+    eiFactor = arcpy.CreateScratchName("eiFactor",data_type="RasterDataset",workspace=scratchWS)
+    outEIfactor = Divide((lsFactor * kFactor * rFactor),tFactor)
 
