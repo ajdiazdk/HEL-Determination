@@ -247,13 +247,24 @@ from arcpy.sa import *
 if __name__ == '__main__':
 
     AOI = arcpy.GetParameter(0)
-    helLayer = arcpy.GetParameter(1)
-    cluLayer = arcpy.GetParameter(2)
-    inputDEM = arcpy.GetParameter(3)
-    zUnits = arcpy.GetParameterAsText(4)
-    kFactorFld = arcpy.GetParameterAsText(5)
-    tFactorFld = arcpy.GetParameterAsText(6)
-    rFactorFld = arcpy.GetParameterAsText(7)
+    cluLayer = arcpy.GetParameter(1)
+    helLayer = arcpy.GetParameter(2)
+    tFactorFld = arcpy.GetParameterAsText(3)
+    kFactorFld = arcpy.GetParameterAsText(4)
+    rFactorFld = arcpy.GetParameterAsText(5)
+    helFld = arcpy.GetParameterAsText(6)
+    inputDEM = arcpy.GetParameter(7)
+    zUnits = arcpy.GetParameterAsText(8)
+
+    AOI = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\CLU_subset1.shp'
+    cluLayer = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\CLU_subset1.shp'
+    helLayer = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\HEL_sample.shp'
+    kFactorFld = "K"
+    tFactorFld = "T"
+    rFactorFld = "R"
+    helFld = "HEL"
+    inputDEM = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\dem_03'
+    zUnits = ""
 
     helSummary = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.mdb\HEL_Determinations\HELSummaryLayer'
     helYes = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.mdb\HEL_Determinations\HELSummaryLayer'
@@ -365,23 +376,41 @@ if __name__ == '__main__':
         AddMsgAndPrint("\n\n\t" + os.path.basename(inputDEM) + " is NOT in a projected Coordinate System....EXITING",2)
         exit()
 
-    """ ---------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
-    AddMsgAndPrint("\nBuffering AOI by 300 Meters")
-    cluBuffer = arcpy.CreateScratchName("cluBuffer",data_type="FeatureClass",workspace=scratchWS)
-    arcpy.Buffer_analysis(cluAOI,cluBuffer,"300 Meters","FULL","ROUND")
-
     """ ---------------------------------------------------------------------------------------------- Intersect Soils (HEL) with CLU (AOI) and configure"""
     AddMsgAndPrint("\nIntersecting Soils and AOI")
     aoiCluIntersect = arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS)
     arcpy.Intersect_analysis([cluAOI,helLayer],aoiCluIntersect,"ALL")
 
-    HELvalueFld = "HELValue"
+    HELvalueFld = 'HELValue'
     if not len(arcpy.ListFields(aoiCluIntersect,HELvalueFld)) > 0:
         AddMsgAndPrint("\tAdding 'HELValue' field")
         arcpy.AddField_management(aoiCluIntersect,HELvalueFld,"SHORT")
 
+    # What to do if value is neither?
+    # Calculate HELValue Field
+    nullHEL = 0
+    with arcpy.da.UpdateCursor(aoiCluIntersect,[helFld,HELvalueFld]) as cursor:
+        for row in cursor:
+            if row[0] == "PHEL":
+                row[1] = 0
+            elif row[0] == "HEL":
+                row[1] = 1
+            elif row[0] == "NHEL":
+                row[1] = 2
+            else:
+                nullHEL+=1
+            cursor.updateRow(row)
+
+    if nullHEL:
+        AddMsgAndPrint("WARNING: There is " + str(nullHEL) + " polygon(s) with no HEL values",1)
+
+    """ ---------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
+    AddMsgAndPrint("\nBuffering AOI by 300 Meters")
+    cluBuffer = arcpy.CreateScratchName("cluBuffer",data_type="FeatureClass",workspace=scratchWS)
+    arcpy.Buffer_analysis(cluAOI,cluBuffer,"300 Meters","FULL","ROUND")
+
     """ ---------------------------------------------------------------------------------------------- Extract DEM using CLU layer"""
-    AddMsgAndPrint("\nExtracting DEM subset using buffered CLU layer")
+    AddMsgAndPrint("\nExtracting DEM subset using buffered AOI")
     demExtract = arcpy.CreateScratchName("demExtract",data_type="RasterDataset",workspace=scratchWS)
     outExtractMask = ExtractByMask(inputDEM,cluAOI)
     outExtractMask.save(demExtract)
@@ -427,6 +456,7 @@ if __name__ == '__main__':
     # 2) 1 < slope < 3  --  Power 0.3
     # 3) 3 < slope < 5  --  Power 0.4
     # 4) slope > 5      --  Power 0.5
+
     AddMsgAndPrint("\nCalculating L Factor")
     lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
     outlFactor = Con(slope < 1,Power(Raster(flowLengthFT) / 72.5,0.2),Con((slope >=  1) & (slope < 3), Power(Raster(flowLengthFT) / 72.5,0.3), Con((slope >= 3) & (slope < 5 ), Power(Raster(flowLengthFT) / 72.5,0.4), Power(Raster(flowLengthFT) / 72.5,0.5))))
@@ -434,27 +464,57 @@ if __name__ == '__main__':
 
     # Calculate LS Factor
     # "%l_factor%" * "%s_factor%"
-    AddMsgAndPrint("Calculating LS Factor")
+    AddMsgAndPrint("\nCalculating LS Factor")
     lsFactor = arcpy.CreateScratchName("lsFactor",data_type="RasterDataset",workspace=scratchWS)
-    outlsFactor = lFactor * sFactor
+    outlsFactor = Raster(lFactor) * Raster(sFactor)
     outlsFactor.save(lsFactor)
 
-    """---------------------------------------------------------------------------------------------- Convert K,T & R Factor to Rasters """
+    """---------------------------------------------------------------------------------------------- Convert K,T & R Factor and HEL Value to Rasters """
+    AddMsgAndPrint("\nConverting Vector to Raster for Spatial Analysis Purpose")
     kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
     tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
     rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
+    helValue = arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS)
 
-    AddMsgAndPrint("\nConverting K Factor field to a raster")
+    AddMsgAndPrint("\tConverting K Factor field to a raster")
     arcpy.FeatureToRaster_conversion(aoiCluIntersect,kFactorFld,kFactor,cellSize)
 
-    AddMsgAndPrint("\nConverting T Factor field to a raster")
+    AddMsgAndPrint("\tConverting T Factor field to a raster")
     arcpy.FeatureToRaster_conversion(aoiCluIntersect,tFactorFld,tFactor,cellSize)
 
-    AddMsgAndPrint("\nConverting R Factor field to a raster")
+    AddMsgAndPrint("\tConverting R Factor field to a raster")
     arcpy.FeatureToRaster_conversion(aoiCluIntersect,rFactorFld,rFactor,cellSize)
+
+    AddMsgAndPrint("\tConverting HEL Value field to a raster")
+    arcpy.FeatureToRaster_conversion(aoiCluIntersect,HELvalueFld,helValue,cellSize)
 
     """---------------------------------------------------------------------------------------------- Calculate EI Factor"""
     AddMsgAndPrint("\nCalculating EI Factor")
     eiFactor = arcpy.CreateScratchName("eiFactor",data_type="RasterDataset",workspace=scratchWS)
-    outEIfactor = Divide((lsFactor * kFactor * rFactor),tFactor)
+    outEIfactor = Divide((Raster(lsFactor) * Raster(kFactor) * Raster(rFactor)),tFactor)
+    outEIfactor.save(eiFactor)
 
+    """---------------------------------------------------------------------------------------------- Calculate Final HEL Factor"""
+    # Con("%hel_factor%"==0,"%EI_grid%",Con("%hel_factor%"==1,9,Con("%hel_factor%"==2,2)))
+    # 1) HEL Value = 0 -- Take EI factor
+    # 2) HEL Value = 1 -- Assign 9
+    # 3) HEL Value = 2 -- Leave it
+
+    AddMsgAndPrint("\nCalculating HEL Factor")
+    helFactor = arcpy.CreateScratchName("helFactor",data_type="RasterDataset",workspace=scratchWS)
+    outHELfactor = Con(helValue == 0, eiFactor ,Con(helValue == 1, 9, Con(helValue == 2, 2, helValue)))
+    outHELfactor.save(helFactor)
+
+    remapString = "0 8 1;8 100000000 2"
+    finalHEL = arcpy.CreateScratchName("finalHEL",data_type="RasterDataset",workspace=scratchWS)
+    arcpy.Reclassify_3d(helFactor, "VALUE", remapString, finalHEL,'NODATA')
+
+    """---------------------------------------------------------------------------------------------- Tablulate Areas"""
+    # Update Acres - Add Calcacre field if it doesn't exist. ---------------Add this check to validation
+    cluNumberFld = "CLUNBR"
+    if not len(arcpy.ListFields(cluAOI,cluNumberFld)) > 0:
+        AddMsgAndPrint("\n'CLUNBR' field NOT found in CLU layer",2)
+        exit()
+
+    outTabulate = arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
+    TabulateArea(cluAOI,cluNumberFld,finalHEL,"VALUE",outTabulate,cellSize)
