@@ -238,6 +238,41 @@ def splitThousands(someNumber):
         errorMsg()
         return someNumber
 
+# ===================================================================================
+def FindField(layer,chkField):
+    # Check table or featureclass to see if specified field exists
+    # If fully qualified name is found, return that name; otherwise return ""
+    # Set workspace before calling FindField
+
+    try:
+
+        if arcpy.Exists(layer):
+
+            theDesc = arcpy.Describe(layer)
+            theFields = theDesc.fields
+            theField = theFields[0]
+
+            for theField in theFields:
+
+                # Parses a fully qualified field name into its components (database, owner name, table name, and field name)
+                parseList = arcpy.ParseFieldName(theField.name) # (null), (null), (null), MUKEY
+
+                # choose the last component which would be the field name
+                theFieldname = parseList.split(",")[len(parseList.split(','))-1].strip()  # MUKEY
+
+                if theFieldname.upper() == chkField.upper():
+                    return theField.name
+
+            return False
+
+        else:
+            AddMsgAndPrint("\tInput layer not found", 0)
+            return False
+
+    except:
+        errorMsg()
+        return False
+
 ## =============================================== Main Body ====================================================
 
 import sys, string, os, locale, traceback, urllib, re, arcpy, operator, getpass
@@ -256,18 +291,31 @@ if __name__ == '__main__':
     inputDEM = arcpy.GetParameter(7)
     zUnits = arcpy.GetParameterAsText(8)
 
-    AOI = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\CLU_subset1.shp'
-    cluLayer = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\CLU_subset1.shp'
-    helLayer = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\HEL_sample.shp'
+    AOI = r'C:\python_scripts\HEL_MN\Sample\CLU_subset3.shp'
+    cluLayer = r'C:\python_scripts\HEL_MN\Sample\clu_sample.shp'
+    helLayer = r'C:\python_scripts\HEL_MN\Sample\HEL_sample.shp'
     kFactorFld = "K"
     tFactorFld = "T"
     rFactorFld = "R"
     helFld = "HEL"
-    inputDEM = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\dem_03'
+    inputDEM = r'C:\python_scripts\HEL_MN\Sample\dem_03'
     zUnits = ""
 
-    helSummary = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.mdb\HEL_Determinations\HELSummaryLayer'
-    helYes = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.mdb\HEL_Determinations\HELSummaryLayer'
+    """ ---------------------------------------------------------------------------------------------- Check HEL Access Database"""
+    # Make sure the HEL access database is present, Exit otherwise
+    helDatabase = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.mdb'
+    if not arcpy.Exists(helDatabase):
+        AddMsgAndPrint("\nHEL Access Data does not exist in the same path as HEL Tools",2)
+        exit()
+
+    # Set the path to the final HEL_YES_NO layer.  Essentially derived from user AOI
+    cluAOI = os.path.join(helDatabase, r'HEL_Determinations\HEL_YES_NO')
+    if arcpy.Exists(cluAOI):
+        try:
+            arcpy.Delete_management(cluAOI)
+        except:
+            AddMsgAndPrint("\nCould not delete the 'HEL_YES_NO' feature class in the HEL access database. Creating an additional layer",2)
+            arcpy.CreateScratchName("HEL_YES_NO",data_type="FeatureClass",workspace=os.path.join(helDatabase,r'HEL_Determinations'))
 
     """ ---------------------------------------------------------------------------------------------- Routine Shit"""
     # Check Availability of Spatial Analyst Extension
@@ -298,21 +346,22 @@ if __name__ == '__main__':
     descAOI = arcpy.Describe(AOI)
     aoiPath = descAOI.catalogPath
     cluLayerPath = arcpy.Describe(cluLayer).catalogPath
-    cluAOI = arcpy.CreateScratchName("cluAOI",data_type="FeatureClass",workspace=scratchWS)
 
     # AOI is digitized and resides in memory; Clip CLU based on the user-digitized polygon.
     if descAOI.dataType.upper() == "FEATURERECORDSETLAYER":
         AddMsgAndPrint("\nClipping the CLU layer to the manually digitized AOI")
         arcpy.Clip_analysis(cluLayer,AOI,cluAOI)
 
-    # AOI is some existing feature.  Not digitized.
+    # AOI is some existing feature.  Not manually digitized.
     else:
-        # AOI came from the CLU
+        # AOI came from the CLU - Most Popular option
         if aoiPath == cluLayerPath:
             AddMsgAndPrint("\nUsing " + str(int(arcpy.GetCount_management(AOI).getOutput(0))) + " features from the CLU Layer as AOI")
             cluAOI = arcpy.CopyFeatures_management(AOI,cluAOI)
+
+        # AOI is not the CLU but an existing layer
         else:
-            AddMsgAndPrint("\nClipping the CLU layer to the manually digitized AOI")
+            AddMsgAndPrint("\nClipping the CLU layer to " + descAOI.name)
             arcpy.Clip_analysis(cluLayer,AOI,cluAOI)
 
     # Update Acres - Add Calcacre field if it doesn't exist.
@@ -325,7 +374,6 @@ if __name__ == '__main__':
     AddMsgAndPrint("\tTotal Acres: " + splitThousands(totalAcres))
 
     """ ---------------------------------------------------------------------------------------------- Check DEM Coordinate System and Linear Units"""
-
     desc = arcpy.Describe(inputDEM)
     inputDEMPath = desc.catalogPath
     sr = desc.SpatialReference
@@ -336,10 +384,13 @@ if __name__ == '__main__':
 
     if units == "Meter":
         units = "Meters"
+        acreConversion = 4046.85642
     elif units == "Foot":
         units = "Feet"
+        acreConversion = 43560
     elif units == "Foot_US":
         units = "Feet"
+        acreConversion = 43560
     else:
         AddMsgAndPrint("\tCould not determine linear units of DEM....Exiting!",2)
         exit()
@@ -389,6 +440,7 @@ if __name__ == '__main__':
     # What to do if value is neither?
     # Calculate HELValue Field
     nullHEL = 0
+    wrongHELvalues = list()
     with arcpy.da.UpdateCursor(aoiCluIntersect,[helFld,HELvalueFld]) as cursor:
         for row in cursor:
             if row[0] == "PHEL":
@@ -397,12 +449,20 @@ if __name__ == '__main__':
                 row[1] = 1
             elif row[0] == "NHEL":
                 row[1] = 2
-            else:
+            elif row[0] is None or row[0] == '':
                 nullHEL+=1
+            else:
+                if not str(row[0]) in wrongHELvalues:
+                    wrongHELvalues.append(str(row[0]))
             cursor.updateRow(row)
 
     if nullHEL:
-        AddMsgAndPrint("WARNING: There is " + str(nullHEL) + " polygon(s) with no HEL values",1)
+        AddMsgAndPrint("\n\tWARNING: There is " + str(nullHEL) + " polygon(s) with no HEL values",1)
+
+    if wrongHELvalues:
+        AddMsgAndPrint("\n\tWARNING: There is " + str(len(set(wrongHELvalues))) + " incorrect HEL values in HEL Layer:",1)
+        for wrongVal in set(wrongHELvalues):
+            AddMsgAndPrint("\t\t" + wrongVal)
 
     """ ---------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
     AddMsgAndPrint("\nBuffering AOI by 300 Meters")
@@ -416,25 +476,25 @@ if __name__ == '__main__':
     outExtractMask.save(demExtract)
 
     """----------------------------------------------------------------------------------------------  Create Slope Layer"""
-    AddMsgAndPrint("\nCreating Slope Derivative")
-    slope = arcpy.CreateScratchName("outSlope",data_type="RasterDataset",workspace=scratchWS)
+    AddMsgAndPrint("\tCreating Slope Derivative")
+    slope = arcpy.CreateScratchName("slope",data_type="RasterDataset",workspace=scratchWS)
     outSlope = Slope(demExtract,"PERCENT_RISE",Zfactor)
     outSlope.save(slope)
 
     """---------------------------------------------------------------------------------------------- Create Flow Direction and Flow Length"""
-    AddMsgAndPrint("\nCalculating Flow Direction")
+    AddMsgAndPrint("\tCalculating Flow Direction")
     flowDirection = arcpy.CreateScratchName("flowDirection",data_type="RasterDataset",workspace=scratchWS)
     outFlowDirection = FlowDirection(demExtract, "FORCE")
     outFlowDirection.save(flowDirection)
 
-    AddMsgAndPrint("\nCalculating Flow Length")
+    AddMsgAndPrint("\tCalculating Flow Length")
     flowLength = arcpy.CreateScratchName("flowLength",data_type="RasterDataset",workspace=scratchWS)
     outFlowLength = FlowLength(flowDirection,"UPSTREAM", "")
     outFlowLength.save(flowLength)
 
     # convert Flow Length distance units to feet if original DEM is not in feet.
     if not units == ("Feet"):
-        AddMsgAndPrint("\tConverting Flow Length Distance units to Feet")
+        AddMsgAndPrint("\t\tConverting Flow Length Distance units to Feet")
         flowLengthFT = arcpy.CreateScratchName("flowLength_FT",data_type="RasterDataset",workspace=scratchWS)
         outflowLengthFT = Raster(flowLength) * Zfactor
         outflowLengthFT.save(flowLengthFT)
@@ -445,7 +505,7 @@ if __name__ == '__main__':
     """---------------------------------------------------------------------------------------------- Calculate LS Factor"""
     # Calculate S Factor
     # ((0.065 +( 0.0456 * ("%slope%"))) +( 0.006541 * (Power("%slope%",2))))
-    AddMsgAndPrint("\nCalculating S Factor")
+    AddMsgAndPrint("\tCalculating S Factor")
     sFactor = arcpy.CreateScratchName("sFactor",data_type="RasterDataset",workspace=scratchWS)
     outsFactor = (Power(slope,2) * 0.006541) + ((Raster(slope) * 0.0456) + 0.065)
     outsFactor.save(sFactor)
@@ -457,14 +517,15 @@ if __name__ == '__main__':
     # 3) 3 < slope < 5  --  Power 0.4
     # 4) slope > 5      --  Power 0.5
 
-    AddMsgAndPrint("\nCalculating L Factor")
+    AddMsgAndPrint("\tCalculating L Factor")
     lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
-    outlFactor = Con(slope < 1,Power(Raster(flowLengthFT) / 72.5,0.2),Con((slope >=  1) & (slope < 3), Power(Raster(flowLengthFT) / 72.5,0.3), Con((slope >= 3) & (slope < 5 ), Power(Raster(flowLengthFT) / 72.5,0.4), Power(Raster(flowLengthFT) / 72.5,0.5))))
+    #outlFactor = Con(slope < 1,Power(Raster(flowLengthFT) / 72.5,0.2),Con((slope >=  1) & (slope < 3), Power(Raster(flowLengthFT) / 72.5,0.3), Con((slope >= 3) & (slope < 5 ), Power(Raster(flowLengthFT) / 72.5,0.4), Power(Raster(flowLengthFT) / 72.5,0.5))))
+    outlFactor = Con(slope,Power(Raster(flowLengthFT) / 72.5,0.2),Con(slope,Power(Raster(flowLengthFT) / 72.5,0.3),Con(slope,Power(Raster(flowLengthFT) / 72.5,0.4),Power(Raster(flowLengthFT) / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
     outlFactor.save(lFactor)
 
     # Calculate LS Factor
     # "%l_factor%" * "%s_factor%"
-    AddMsgAndPrint("\nCalculating LS Factor")
+    AddMsgAndPrint("\tCalculating LS Factor")
     lsFactor = arcpy.CreateScratchName("lsFactor",data_type="RasterDataset",workspace=scratchWS)
     outlsFactor = Raster(lFactor) * Raster(sFactor)
     outlsFactor.save(lsFactor)
@@ -496,13 +557,15 @@ if __name__ == '__main__':
 
     """---------------------------------------------------------------------------------------------- Calculate Final HEL Factor"""
     # Con("%hel_factor%"==0,"%EI_grid%",Con("%hel_factor%"==1,9,Con("%hel_factor%"==2,2)))
+    # Create Conditional statement to reflect the following:
     # 1) HEL Value = 0 -- Take EI factor
     # 2) HEL Value = 1 -- Assign 9
-    # 3) HEL Value = 2 -- Leave it
+    # 3) HEL Value = 2 -- Assign 2 (No action needed)
 
     AddMsgAndPrint("\nCalculating HEL Factor")
     helFactor = arcpy.CreateScratchName("helFactor",data_type="RasterDataset",workspace=scratchWS)
-    outHELfactor = Con(helValue == 0, eiFactor ,Con(helValue == 1, 9, Con(helValue == 2, 2, helValue)))
+    #outHELfactor = Con(helValue == 0, eiFactor ,Con(helValue == 1, 9, Con(helValue == 2, 2, helValue)))
+    outHELfactor = Con(helValue,eiFactor,Con(helValue,9,helValue,"VALUE=1"),"VALUE=0")
     outHELfactor.save(helFactor)
 
     remapString = "0 8 1;8 100000000 2"
@@ -510,11 +573,47 @@ if __name__ == '__main__':
     arcpy.Reclassify_3d(helFactor, "VALUE", remapString, finalHEL,'NODATA')
 
     """---------------------------------------------------------------------------------------------- Tablulate Areas"""
-    # Update Acres - Add Calcacre field if it doesn't exist. ---------------Add this check to validation
-    cluNumberFld = "CLUNBR"
-    if not len(arcpy.ListFields(cluAOI,cluNumberFld)) > 0:
-        AddMsgAndPrint("\n'CLUNBR' field NOT found in CLU layer",2)
-        exit()
+    AddMsgAndPrint("\nDetermining HEL fields:")
+    cluNumberFld = FindField(cluAOI,"CLUNBR")
 
     outTabulate = arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
     TabulateArea(cluAOI,cluNumberFld,finalHEL,"VALUE",outTabulate,cellSize)
+
+    fieldList = ["HEL_Acres","HEL_Pct","HEL_YES"]
+    for field in fieldList:
+        if not FindField(cluAOI,field):
+            if field == "HEL_YES":
+                arcpy.AddField_management(cluAOI,field,"TEXT","","",5)
+            else:
+                arcpy.AddField_management(cluAOI,field,"FLOAT")
+
+    fieldList.append(cluNumberFld)
+    fieldList.append(calcAcreFld)
+
+    with arcpy.da.UpdateCursor(cluAOI,fieldList) as cursor:
+        for row in cursor:
+
+            expression = arcpy.AddFieldDelimiters(outTabulate,cluNumberFld) + " = " + str(row[3])
+            helAcres = ([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"), where_clause = expression)][0])/acreConversion
+
+            # set default values
+            row[0] = "0"
+            row[1] = "0"
+            row[2] = "No"
+
+            if helAcres:
+                helPct = (helAcres / row[4]) * 100
+
+                if helPct > 33.3333:
+                    row[0] = helAcres
+                    row[1] = helPct
+                    row[2] = "Yes"
+
+                AddMsgAndPrint("\tCLU #: " + str(row[3]) + " - " + splitThousands(helAcres) + " ac. - " + str(round(helPct,1)) + "%" + " HEL --> " + row[2])
+
+            else:
+                AddMsgAndPrint("\tCLU #: " + str(row[3]) + " - 0 ac. - HEL --> No")
+
+            cursor.updateRow(row)
+
+    exit()
