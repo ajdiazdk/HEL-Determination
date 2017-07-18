@@ -309,13 +309,19 @@ if __name__ == '__main__':
         exit()
 
     # Set the path to the final HEL_YES_NO layer.  Essentially derived from user AOI
-    cluAOI = os.path.join(helDatabase, r'HEL_Determinations\HEL_YES_NO')
+    print 1
+    cluAOI = os.path.join(helDatabase, r'HEL_Determinations' + os.sep + r'HEL_YES_NO')
     if arcpy.Exists(cluAOI):
+        print 2
         try:
+            print 3
             arcpy.Delete_management(cluAOI)
         except:
+            print 4
             AddMsgAndPrint("\nCould not delete the 'HEL_YES_NO' feature class in the HEL access database. Creating an additional layer",2)
             arcpy.CreateScratchName("HEL_YES_NO",data_type="FeatureClass",workspace=os.path.join(helDatabase,r'HEL_Determinations'))
+
+    exit()
 
     """ ---------------------------------------------------------------------------------------------- Routine Shit"""
     # Check Availability of Spatial Analyst Extension
@@ -615,5 +621,3 @@ if __name__ == '__main__':
                 AddMsgAndPrint("\tCLU #: " + str(row[3]) + " - 0 ac. - HEL --> No")
 
             cursor.updateRow(row)
-
-    exit()
