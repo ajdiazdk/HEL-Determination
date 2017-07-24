@@ -313,20 +313,28 @@ if __name__ == '__main__':
         # Set the path to the final HEL_YES_NO layer.  Essentially derived from user AOI
         cluAOI = os.path.join(helDatabase, r'HEL_YES_NO')
         helSummary = os.path.join(helDatabase, r'HELSummaryLayer')
+        finalHEL = os.path.join(helDatabase, r'Final_HEL_Map')
 
         if arcpy.Exists(cluAOI):
             try:
                 arcpy.Delete_management(cluAOI)
             except:
                 AddMsgAndPrint("\nCould not delete the 'HEL_YES_NO' feature class in the HEL access database. Creating an additional layer",2)
-                cluAOI = arcpy.CreateScratchName("HEL_YES_NO",data_type="FeatureClass",workspace=os.path.join(helDatabase,r'HEL_Determinations'))
+                cluAOI = arcpy.CreateScratchName("HEL_YES_NO",data_type="FeatureClass",workspace=helDatabase)
 
         if arcpy.Exists(helSummary):
             try:
                 arcpy.Delete_management(helSummary)
             except:
                 AddMsgAndPrint("\nCould not delete the 'HELSummaryLayer' feature class in the HEL access database. Creating an additional layer",2)
-                helSummary = arcpy.CreateScratchName("HELSummaryLayer",data_type="FeatureClass",workspace=os.path.join(helDatabase,r'HEL_Determinations'))
+                helSummary = arcpy.CreateScratchName("HELSummaryLayer",data_type="FeatureClass",workspace=helDatabase)
+
+        if arcpy.Exists(finalHEL):
+            try:
+                arcpy.Delete_management(finalHEL)
+            except:
+                AddMsgAndPrint("\nCould not delete the 'Final_HEL_Map' raster layer in the HEL access database. Creating an additional layer",2)
+                helSummary = arcpy.CreateScratchName("Final_HEL_Map", data_type="RasterDataset", workspace=helDatabase)
 
         arcpy.env.overwriteOutput = True
 
@@ -398,10 +406,7 @@ if __name__ == '__main__':
         if units == "Meter":
             units = "Meters"
             acreConversion = 4046.85642
-        elif units == "Foot":
-            units = "Feet"
-            acreConversion = 43560
-        elif units == "Foot_US":
+        elif units == "Foot" or units == "Foot_US":
             units = "Feet"
             acreConversion = 43560
         else:
@@ -650,7 +655,7 @@ if __name__ == '__main__':
         """---------------------------------------------------------------------------------------------- Calculate EI Factor"""
         arcpy.SetProgressorLabel("Calculating EI Factor")
         AddMsgAndPrint("\nCalculating EI Factor")
-        eiFactor = arcpy.CreateScratchName("eiFactor",data_type="RasterDataset",workspace=scratchWS)
+        eiFactor = arcpy.CreateScratchName("eiFactor", data_type="RasterDataset", workspace=scratchWS)
         outEIfactor = Divide((Raster(lsFactor) * Raster(kFactor) * Raster(rFactor)),Raster(tFactor))
         outEIfactor.save(eiFactor)
         arcpy.SetProgressorPosition()
@@ -661,6 +666,7 @@ if __name__ == '__main__':
         # 1) HEL Value = 0 -- Take EI factor
         # 2) HEL Value = 1 -- Assign 9
         # 3) HEL Value = 2 -- Assign 2 (No action needed)
+        # Anything above 8 is HEL
 
         arcpy.SetProgressorLabel("Calculating HEL Factor")
         AddMsgAndPrint("\nCalculating HEL Factor")
@@ -668,8 +674,8 @@ if __name__ == '__main__':
         outHELfactor = Con(Raster(helValue),Raster(eiFactor),Con(Raster(helValue),9,Raster(helValue),"VALUE=1"),"VALUE=0")
         outHELfactor.save(helFactor)
 
+        #finalHEL = arcpy.CreateScratchName("finalHEL",data_type="RasterDataset",workspace=scratchWS)
         remapString = "0 8 1;8 100000000 2"
-        finalHEL = arcpy.CreateScratchName("finalHEL",data_type="RasterDataset",workspace=scratchWS)
         arcpy.Reclassify_3d(helFactor, "VALUE", remapString, finalHEL,'NODATA')
         arcpy.SetProgressorPosition()
 
@@ -708,7 +714,7 @@ if __name__ == '__main__':
                 clu = row[3]
                 helPct = 0
 
-                if helAcres:
+                if helAcres > 0:
                     helPct = (helAcres / row[4]) * 100
 
                     if helPct > 33.3333:
