@@ -312,13 +312,21 @@ if __name__ == '__main__':
 
         # Set the path to the final HEL_YES_NO layer.  Essentially derived from user AOI
         cluAOI = os.path.join(helDatabase, r'HEL_YES_NO')
+        helSummary = os.path.join(helDatabase, r'HELSummaryLayer')
 
         if arcpy.Exists(cluAOI):
             try:
                 arcpy.Delete_management(cluAOI)
             except:
                 AddMsgAndPrint("\nCould not delete the 'HEL_YES_NO' feature class in the HEL access database. Creating an additional layer",2)
-                arcpy.CreateScratchName("HEL_YES_NO",data_type="FeatureClass",workspace=os.path.join(helDatabase,r'HEL_Determinations'))
+                cluAOI = arcpy.CreateScratchName("HEL_YES_NO",data_type="FeatureClass",workspace=os.path.join(helDatabase,r'HEL_Determinations'))
+
+        if arcpy.Exists(helSummary):
+            try:
+                arcpy.Delete_management(helSummary)
+            except:
+                AddMsgAndPrint("\nCould not delete the 'HELSummaryLayer' feature class in the HEL access database. Creating an additional layer",2)
+                helSummary = arcpy.CreateScratchName("HELSummaryLayer",data_type="FeatureClass",workspace=os.path.join(helDatabase,r'HEL_Determinations'))
 
         arcpy.env.overwriteOutput = True
 
@@ -435,6 +443,9 @@ if __name__ == '__main__':
         arcpy.SetProgressor("step", "Calculating HEL Determination", 0, 17, 1)
 
         """ ---------------------------------------------------------------------------------------------- Intersect Soils (HEL) with CLU (AOI) and configure"""
+        # This layer will eventually be the HELSummaryLayer that will live in
+        # the access database.
+
         arcpy.SetProgressorLabel("Intersecting Soils and AOI")
         AddMsgAndPrint("\nIntersecting Soils and AOI")
         aoiCluIntersect = arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS)
@@ -463,45 +474,61 @@ if __name__ == '__main__':
         HELvalueFld = 'HELValue'
         HELacres = 'HEL_Acres'
         if not len(arcpy.ListFields(aoiCluIntersect,HELvalueFld)) > 0:
-            AddMsgAndPrint("\tAdding 'HELValue' field")
             arcpy.AddField_management(aoiCluIntersect,HELvalueFld,"SHORT")
 
         if not len(arcpy.ListFields(aoiCluIntersect,HELacres)) > 0:
-            AddMsgAndPrint("\tAdding 'HEL_Acres' field")
-            arcpy.AddField_management(aoiCluIntersect,HELvalueFld,"DOUBLE")
+            arcpy.AddField_management(aoiCluIntersect,HELacres,"DOUBLE")
 
         # What to do if value is neither?
         # Calculate HELValue Field
-        pHELvalues = False
+        helDict = dict()
         nullHEL = 0
         wrongHELvalues = list()
-        with arcpy.da.UpdateCursor(aoiCluIntersect,[helFld,HELvalueFld]) as cursor:
+        with arcpy.da.UpdateCursor(aoiCluIntersect,[helFld,HELvalueFld,"SHAPE@AREA"]) as cursor:
             for row in cursor:
-                if row[0] == "PHEL":
+                if row[0] is None or row[0] == '':
+                    nullHEL+=1
+                    continue
+                elif row[0] == "PHEL":
                     row[1] = 0
-                    pHELvalues = True
                 elif row[0] == "HEL":
                     row[1] = 1
                 elif row[0] == "NHEL":
                     row[1] = 2
-                elif row[0] is None or row[0] == '':
-                    nullHEL+=1
                 else:
                     if not str(row[0]) in wrongHELvalues:
                         wrongHELvalues.append(str(row[0]))
+
+                # Add hel value to a dictionary to keep track of values and area
+                if not helDict.has_key(row[0]):
+                    helDict[row[0]] = row[2]
+                else:
+                    helDict[row[0]] += row[2]
+
                 cursor.updateRow(row)
 
-        if not pHELvalues:
+        # Exit if no PHEL values were found
+        if not helDict.has_key('PHEL'):
             AddMsgAndPrint("\n\tThere are no PHEL values in HEL layer.  No need to proceed.  Exiting!",2)
             exit()
 
+        # Inform user about NULL values
         if nullHEL:
             AddMsgAndPrint("\n\tWARNING: There is " + str(nullHEL) + " polygon(s) with no HEL values",1)
 
+        # Inform user about HEL values beyond PHEL,HEL, NHEL
         if wrongHELvalues:
             AddMsgAndPrint("\n\tWARNING: There is " + str(len(set(wrongHELvalues))) + " incorrect HEL values in HEL Layer:",1)
             for wrongVal in set(wrongHELvalues):
                 AddMsgAndPrint("\t\t" + wrongVal)
+
+        # Print Original HEL values
+        AddMsgAndPrint("\n\HEL Layer Summary:")
+        for val in helDict:
+            acres = round(helDict[val] / 4046.85642,1)
+            pct = round((acres/totalIntAcres)*100,1)
+            AddMsgAndPrint("\t\t" + val + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
+
         arcpy.SetProgressorPosition()
 
         """ ---------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
@@ -705,11 +732,23 @@ if __name__ == '__main__':
         arcpy.SetProgressorPosition()
 
         """ ---------------------------Add HEL Feature Class to ArcMap Session if available ------------------"""
+        # Move the aoiCLUIntersect layer to the access
+        # databaes and rename to HELSummary
+        arcpy.CopyFeatures_management(aoiCluIntersect,helSummary)
+
         try:
+            # Put this section in a try-except. It will fail if run from ArcCatalog
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            arcpy.MakeFeatureLayer_management(comFC2, comFL)
+            lyrFile = os.path.join( os.path.dirname(sys.argv[0]), "RedLine.lyr")
+            arcpy.ApplySymbologyFromLayer_management(comFL, lyrFile)
+            PrintMsg("Adding 'QA Common Lines' layer with " + str(iCL) + " errors to ArcMap \n ", 1)
+
             mxd = arcpy.mapping.MapDocument("CURRENT")
             df = arcpy.mapping.ListDataFrames(mxd)[0]
             lyr = os.path.join(cluAOI)
             newLayer = arcpy.mapping.Layer(lyr)
+            arcpy.mapping.AddLayer(df, newLayer, "TOP")
             arcpy.mapping.AddLayer(df, newLayer, "TOP")
             AddMsgAndPrint("\nAdded Final HEL feature class to your ArcMap Session",0)
         except:
