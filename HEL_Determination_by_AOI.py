@@ -284,22 +284,22 @@ if __name__ == '__main__':
     AOI = arcpy.GetParameter(0)
     cluLayer = arcpy.GetParameter(1)
     helLayer = arcpy.GetParameter(2)
-    tFactorFld = arcpy.GetParameterAsText(3)
-    kFactorFld = arcpy.GetParameterAsText(4)
+    kFactorFld = arcpy.GetParameterAsText(3)
+    tFactorFld = arcpy.GetParameterAsText(4)
     rFactorFld = arcpy.GetParameterAsText(5)
     helFld = arcpy.GetParameterAsText(6)
     inputDEM = arcpy.GetParameter(7)
     zUnits = arcpy.GetParameterAsText(8)
 
-    AOI = r'C:\python_scripts\HEL_MN\Sample\CLU_subset2.shp'
-    cluLayer = r'C:\python_scripts\HEL_MN\Sample\clu_sample.shp'
-    helLayer = r'C:\python_scripts\HEL_MN\Sample\HEL_sample.shp'
-    kFactorFld = "K"
-    tFactorFld = "T"
-    rFactorFld = "R"
-    helFld = "HEL"
-    inputDEM = r'C:\python_scripts\HEL_MN\Sample\dem_03'
-    zUnits = ""
+##    AOI = r'C:\python_scripts\HEL_MN\Sample\CLU_subset2.shp'
+##    cluLayer = r'C:\python_scripts\HEL_MN\Sample\clu_sample.shp'
+##    helLayer = r'C:\python_scripts\HEL_MN\Sample\HEL_sample.shp'
+##    kFactorFld = "K"
+##    tFactorFld = "T"
+##    rFactorFld = "R"
+##    helFld = "HEL"
+##    inputDEM = r'C:\python_scripts\HEL_MN\Sample\dem_03'
+##    zUnits = ""
 
     try:
 
@@ -409,7 +409,7 @@ if __name__ == '__main__':
             exit()
 
         # if zUnits were left blank than assume Z-values are the same as XY units.
-        if not len(zUnits) > 0:
+        if not zUnits:
             zUnits = units
 
         # Coordinate System must be a Projected type in order to continue.
@@ -418,14 +418,16 @@ if __name__ == '__main__':
         # the z units by multiplying by the Zfactor
 
         if sr.Type == "Projected":
-            if zUnits == "Meters":
-                Zfactor = 3.280839896       # 3.28 feet in a meter
+            if not zUnits == units:
 
-            elif zUnits == "Centimeters":   # 0.033 feet in a centimeter
-                Zfactor = 0.0328084
+                if zUnits == "Meters":
+                    Zfactor = 3.280839896       # 3.28 feet in a meter
 
-            elif zUnits == "Inches":        # 0.083 feet in an inch
-                Zfactor = 0.0833333
+                elif zUnits == "Centimeters":   # 0.033 feet in a centimeter
+                    Zfactor = 0.0328084
+
+                elif zUnits == "Inches":        # 0.083 feet in an inch
+                    Zfactor = 0.0833333
 
             # z units and XY units are the same thus no conversion is required (Feet is assumed here)
             else:
@@ -435,12 +437,16 @@ if __name__ == '__main__':
             AddMsgAndPrint("\tXY Linear Units: " + units,0)
             AddMsgAndPrint("\tElevation Values (Z): " + zUnits,0)
             AddMsgAndPrint("\tCell Size: " + str(desc.MeanCellWidth) + " x " + str(desc.MeanCellHeight) + " " + units,0)
+            AddMsgAndPrint("\tZ-Factor: " + str(Zfactor) )
 
         else:
             AddMsgAndPrint("\n\n\t" + os.path.basename(inputDEM) + " is NOT in a projected Coordinate System....EXITING",2)
             exit()
 
         arcpy.SetProgressor("step", "Calculating HEL Determination", 0, 17, 1)
+
+        # Snap every raster layer to the DEM
+        arcpy.env.snapRaster = inputDEMPath
 
         """ ---------------------------------------------------------------------------------------------- Intersect Soils (HEL) with CLU (AOI) and configure"""
         # This layer will eventually be the HELSummaryLayer that will live in
@@ -523,7 +529,7 @@ if __name__ == '__main__':
                 AddMsgAndPrint("\t\t" + wrongVal)
 
         # Print Original HEL values
-        AddMsgAndPrint("\n\HEL Layer Summary:")
+        AddMsgAndPrint("\tHEL Layer Summary:")
         for val in helDict:
             acres = round(helDict[val] / 4046.85642,1)
             pct = round((acres/totalIntAcres)*100,1)
@@ -542,7 +548,7 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Extracting DEM subset using buffered AOI")
         AddMsgAndPrint("\nExtracting DEM subset using buffered AOI")
         demExtract = arcpy.CreateScratchName("demExtract",data_type="RasterDataset",workspace=scratchWS)
-        outExtractMask = ExtractByMask(inputDEM,cluAOI)
+        outExtractMask = ExtractByMask(inputDEM,cluBuffer)
         outExtractMask.save(demExtract)
         arcpy.SetProgressorPosition()
 
@@ -569,10 +575,10 @@ if __name__ == '__main__':
         outFlowLength.save(flowLength)
 
         # convert Flow Length distance units to feet if original DEM is not in feet.
-        if not units == ("Feet"):
+        if not zUnits == ("Feet"):
             AddMsgAndPrint("\t\tConverting Flow Length Distance units to Feet")
             flowLengthFT = arcpy.CreateScratchName("flowLength_FT",data_type="RasterDataset",workspace=scratchWS)
-            outflowLengthFT = Raster(flowLength) * Zfactor
+            outflowLengthFT = Raster(flowLength) * 3.280839896
             outflowLengthFT.save(flowLengthFT)
             arcpy.SetProgressorPosition()
 
@@ -586,7 +592,7 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Calculating S Factor")
         AddMsgAndPrint("\tCalculating S Factor")
         sFactor = arcpy.CreateScratchName("sFactor",data_type="RasterDataset",workspace=scratchWS)
-        outsFactor = (Power(slope,2) * 0.006541) + ((Raster(slope) * 0.0456) + 0.065)
+        outsFactor = (Power(Raster(slope),2) * 0.006541) + ((Raster(slope) * 0.0456) + 0.065)
         outsFactor.save(sFactor)
         arcpy.SetProgressorPosition()
 
@@ -601,7 +607,7 @@ if __name__ == '__main__':
         AddMsgAndPrint("\tCalculating L Factor")
         lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
         #outlFactor = Con(slope < 1,Power(Raster(flowLengthFT) / 72.5,0.2),Con((slope >=  1) & (slope < 3), Power(Raster(flowLengthFT) / 72.5,0.3), Con((slope >= 3) & (slope < 5 ), Power(Raster(flowLengthFT) / 72.5,0.4), Power(Raster(flowLengthFT) / 72.5,0.5))))
-        outlFactor = Con(slope,Power(Raster(flowLengthFT) / 72.5,0.2),Con(slope,Power(Raster(flowLengthFT) / 72.5,0.3),Con(slope,Power(Raster(flowLengthFT) / 72.5,0.4),Power(Raster(flowLengthFT) / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
+        outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.2),Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.3),Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.4),Power(Raster(flowLengthFT) / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
         outlFactor.save(lFactor)
         arcpy.SetProgressorPosition()
 
@@ -645,7 +651,7 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Calculating EI Factor")
         AddMsgAndPrint("\nCalculating EI Factor")
         eiFactor = arcpy.CreateScratchName("eiFactor",data_type="RasterDataset",workspace=scratchWS)
-        outEIfactor = Divide((Raster(lsFactor) * Raster(kFactor) * Raster(rFactor)),tFactor)
+        outEIfactor = Divide((Raster(lsFactor) * Raster(kFactor) * Raster(rFactor)),Raster(tFactor))
         outEIfactor.save(eiFactor)
         arcpy.SetProgressorPosition()
 
@@ -659,8 +665,7 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Calculating HEL Factor")
         AddMsgAndPrint("\nCalculating HEL Factor")
         helFactor = arcpy.CreateScratchName("helFactor",data_type="RasterDataset",workspace=scratchWS)
-        #outHELfactor = Con(helValue == 0, eiFactor ,Con(helValue == 1, 9, Con(helValue == 2, 2, helValue)))
-        outHELfactor = Con(helValue,eiFactor,Con(helValue,9,helValue,"VALUE=1"),"VALUE=0")
+        outHELfactor = Con(Raster(helValue),Raster(eiFactor),Con(Raster(helValue),9,Raster(helValue),"VALUE=1"),"VALUE=0")
         outHELfactor.save(helFactor)
 
         remapString = "0 8 1;8 100000000 2"
@@ -669,8 +674,8 @@ if __name__ == '__main__':
         arcpy.SetProgressorPosition()
 
         """---------------------------------------------------------------------------------------------- Tablulate Areas"""
-        arcpy.SetProgressorLabel("Determining HEL fields:")
-        AddMsgAndPrint("\nDetermining HEL fields:")
+        arcpy.SetProgressorLabel("Summarizing HEL values by CLUs:")
+        AddMsgAndPrint("\nSummarizing HEL values by CLUs:")
         cluNumberFld = FindField(cluAOI,"CLUNBR")
 
         outTabulate = arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
