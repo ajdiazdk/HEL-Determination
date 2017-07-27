@@ -1,12 +1,22 @@
 #-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
+# Name:        HEL Determination by AOI
 #
-# Author:      Adolfo.Diaz
+# Author: Adolfo.Diaz
+# e-mail: adolfo.diaz@wi.usda.gov
+# phone: 608.662.4422 ext. 216
 #
-# Created:     07/06/2017
-# Copyright:   (c) Adolfo.Diaz 2017
-# Licence:     <your licence>
+# Author: Kevin Godsey
+# e-mail: kevin.godsey@mo.usda.gov
+# phone: 608.662.4422 ext. 190
+#
+# Author: Christiane Roy
+# e-mail: christian.roy@mn.usda.gov
+# phone: 608.662.4422 ext. 190
+#
+# Created:     7/04/2016
+# Last Modified: 5/18/2017
+# Copyright:   (c) Adolfo.Diaz 2016
+
 #-------------------------------------------------------------------------------
 
 ## ===================================================================================
@@ -291,15 +301,15 @@ if __name__ == '__main__':
     inputDEM = arcpy.GetParameter(7)
     zUnits = arcpy.GetParameterAsText(8)
 
-##    AOI = r'C:\python_scripts\HEL_MN\Sample\CLU_subset2.shp'
-##    cluLayer = r'C:\python_scripts\HEL_MN\Sample\clu_sample.shp'
-##    helLayer = r'C:\python_scripts\HEL_MN\Sample\HEL_sample.shp'
-##    kFactorFld = "K"
-##    tFactorFld = "T"
-##    rFactorFld = "R"
-##    helFld = "HEL"
-##    inputDEM = r'C:\python_scripts\HEL_MN\Sample\dem_03'
-##    zUnits = ""
+    AOI = r'C:\python_scripts\HEL_MN\Sample\CLU_subset3.shp'
+    cluLayer = r'C:\python_scripts\HEL_MN\Sample\clu_sample.shp'
+    helLayer = r'C:\python_scripts\HEL_MN\Sample\HEL_sample.shp'
+    kFactorFld = "K"
+    tFactorFld = "T"
+    rFactorFld = "R"
+    helFld = "HEL"
+    inputDEM = r'C:\python_scripts\HEL_MN\Sample\dem_03'
+    zUnits = ""
 
     try:
 
@@ -311,16 +321,16 @@ if __name__ == '__main__':
             exit()
 
         # Set the path to the final HEL_YES_NO layer.  Essentially derived from user AOI
-        cluAOI = os.path.join(helDatabase, r'HEL_YES_NO')
+        helYesNo = os.path.join(helDatabase, r'HEL_YES_NO')
         helSummary = os.path.join(helDatabase, r'HELSummaryLayer')
-        finalHEL = os.path.join(helDatabase, r'Final_HEL_Map')
+        finalHELmap = os.path.join(helDatabase, r'finalhelmap')
 
-        if arcpy.Exists(cluAOI):
+        if arcpy.Exists(helYesNo):
             try:
-                arcpy.Delete_management(cluAOI)
+                arcpy.Delete_management(helYesNo)
             except:
                 AddMsgAndPrint("\nCould not delete the 'HEL_YES_NO' feature class in the HEL access database. Creating an additional layer",2)
-                cluAOI = arcpy.CreateScratchName("HEL_YES_NO",data_type="FeatureClass",workspace=helDatabase)
+                helYesNo = arcpy.CreateScratchName("HEL_YES_NO",data_type="FeatureClass",workspace=helDatabase)
 
         if arcpy.Exists(helSummary):
             try:
@@ -329,12 +339,12 @@ if __name__ == '__main__':
                 AddMsgAndPrint("\nCould not delete the 'HELSummaryLayer' feature class in the HEL access database. Creating an additional layer",2)
                 helSummary = arcpy.CreateScratchName("HELSummaryLayer",data_type="FeatureClass",workspace=helDatabase)
 
-        if arcpy.Exists(finalHEL):
+        if arcpy.Exists(finalHELmap):
             try:
-                arcpy.Delete_management(finalHEL)
+                arcpy.Delete_management(finalHELmap)
             except:
                 AddMsgAndPrint("\nCould not delete the 'Final_HEL_Map' raster layer in the HEL access database. Creating an additional layer",2)
-                helSummary = arcpy.CreateScratchName("Final_HEL_Map", data_type="RasterDataset", workspace=helDatabase)
+                finalHELmap = arcpy.CreateScratchName("finalhelmap", data_type="RasterDataset", workspace=helDatabase)
 
         arcpy.env.overwriteOutput = True
 
@@ -371,27 +381,27 @@ if __name__ == '__main__':
         # AOI is digitized and resides in memory; Clip CLU based on the user-digitized polygon.
         if descAOI.dataType.upper() == "FEATURERECORDSETLAYER":
             AddMsgAndPrint("\nClipping the CLU layer to the manually digitized AOI")
-            arcpy.Clip_analysis(cluLayer,AOI,cluAOI)
+            arcpy.Clip_analysis(cluLayer,AOI,helYesNo)
 
         # AOI is some existing feature.  Not manually digitized.
         else:
             # AOI came from the CLU - Most Popular option
             if aoiPath == cluLayerPath:
                 AddMsgAndPrint("\nUsing " + str(int(arcpy.GetCount_management(AOI).getOutput(0))) + " features from the CLU Layer as AOI")
-                cluAOI = arcpy.CopyFeatures_management(AOI,cluAOI)
+                helYesNo = arcpy.CopyFeatures_management(AOI,helYesNo)
 
             # AOI is not the CLU but an existing layer
             else:
                 AddMsgAndPrint("\nClipping the CLU layer to " + descAOI.name + " (AOI)")
-                arcpy.Clip_analysis(cluLayer,AOI,cluAOI)
+                arcpy.Clip_analysis(cluLayer,AOI,helYesNo)
 
         # Update Acres - Add Calcacre field if it doesn't exist.
         calcAcreFld = "CALCACRES"
-        if not len(arcpy.ListFields(cluAOI,calcAcreFld)) > 0:
-            arcpy.AddField_management(cluAOI,calcAcreFld,"DOUBLE")
+        if not len(arcpy.ListFields(helYesNo,calcAcreFld)) > 0:
+            arcpy.AddField_management(helYesNo,calcAcreFld,"DOUBLE")
 
-        arcpy.CalculateField_management(cluAOI,calcAcreFld,"!shape.area@acres!","PYTHON_9.3")
-        totalAcres = float("%.1f" % (sum([row[0] for row in arcpy.da.SearchCursor(cluAOI, (calcAcreFld))])))
+        arcpy.CalculateField_management(helYesNo,calcAcreFld,"!shape.area@acres!","PYTHON_9.3")
+        totalAcres = float("%.1f" % (sum([row[0] for row in arcpy.da.SearchCursor(helYesNo, (calcAcreFld))])))
         AddMsgAndPrint("\tTotal Acres: " + splitThousands(totalAcres))
 
         """ ---------------------------------------------------------------------------------------------- Check DEM Coordinate System and Linear Units"""
@@ -453,49 +463,60 @@ if __name__ == '__main__':
         # Snap every raster layer to the DEM
         arcpy.env.snapRaster = inputDEMPath
 
-        """ ---------------------------------------------------------------------------------------------- Intersect Soils (HEL) with CLU (AOI) and configure"""
-        # This layer will eventually be the HELSummaryLayer that will live in
-        # the access database.
+        """ ---------------------------------------------------------------------------------------------- Compute Summary of original HEL values"""
 
-        arcpy.SetProgressorLabel("Intersecting Soils and AOI")
-        AddMsgAndPrint("\nIntersecting Soils and AOI")
+        # -------------------------------------------- Intersect CLU with soils
+        arcpy.SetProgressorLabel("Computing summary of original HEL Values")
+        AddMsgAndPrint("\nComputing summary of original HEL Values")
         aoiCluIntersect = arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS)
-        arcpy.Intersect_analysis([cluAOI,helLayer],aoiCluIntersect,"ALL")
+        arcpy.Intersect_analysis([helYesNo,helLayer],aoiCluIntersect,"ALL")
 
+        # Test intersection
         totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(aoiCluIntersect, ("SHAPE@AREA"))]) / 4046.85642
         if not totalIntAcres:
             AddMsgAndPrint("\tThere is no overlap between AOI and HEL Layer. EXITTING!",2)
             exit()
 
-        #Check for Multipart features.  Explode if multipart features exist
-        bMultipart = False
-        geometries = arcpy.CopyFeatures_management(aoiCluIntersect,arcpy.Geometry())
-        for geometry in geometries:
-            if geometry.isMultipart:
-                bMultipart = True
-                break
+        # --------------------------------------------- Dissolve intersection output by the following fields
+        dissovleFlds = ["CLUNBR","TRACTNBR","FARMNBR","COUNTYCD"]
+        for fld in dissovleFlds:
+            if not FindField(helYesNo,fld):
+                AddMsgAndPrint("\n\tMissing CLU Layer field: " + fld,2)
+                AddMsgAndPrint("\n\tExiting!")
+                exit()
 
-        if bMultipart:
-            aoiCluIntersect_sp = arcpy.CreateScratchName("aoiCLUIntersect_sp",data_type="FeatureClass",workspace=scratchWS)
-            arcpy.MultipartToSinglepart_management(aoiCluIntersect,aoiCluIntersect_sp)
-            arcpy.Delete_management(aoiCluIntersect)
-            aoiCluIntersect = aoiCluIntersect_sp
+        dissovleFlds.append(helFld)
+        arcpy.Dissolve_management(aoiCluIntersect, helSummary, dissovleFlds, "","SINGLE_PART", "DISSOLVE_LINES")
 
-        # Add Necessary Fields
+##        #Check for Multipart features.  Explode if multipart features exist
+##        bMultipart = False
+##        geometries = arcpy.CopyFeatures_management(aoiCluIntersect,arcpy.Geometry())
+##        for geometry in geometries:
+##            if geometry.isMultipart:
+##                bMultipart = True
+##                break
+##
+##        if bMultipart:
+##            aoiCluIntersect_sp = arcpy.CreateScratchName("aoiCLUIntersect_sp",data_type="FeatureClass",workspace=scratchWS)
+##            arcpy.MultipartToSinglepart_management(aoiCluIntersect,aoiCluIntersect_sp)
+##            arcpy.Delete_management(aoiCluIntersect)
+##            aoiCluIntersect = aoiCluIntersect_sp
+
+        # --------------------------------------------- Add and Update fields in the HEL Summary Layer (HEL Value, HEL Acres)
         HELvalueFld = 'HELValue'
         HELacres = 'HEL_Acres'
-        if not len(arcpy.ListFields(aoiCluIntersect,HELvalueFld)) > 0:
-            arcpy.AddField_management(aoiCluIntersect,HELvalueFld,"SHORT")
+        if not len(arcpy.ListFields(helSummary,HELvalueFld)) > 0:
+            arcpy.AddField_management(helSummary,HELvalueFld,"SHORT")
 
-        if not len(arcpy.ListFields(aoiCluIntersect,HELacres)) > 0:
-            arcpy.AddField_management(aoiCluIntersect,HELacres,"DOUBLE")
+        if not len(arcpy.ListFields(helSummary,HELacres)) > 0:
+            arcpy.AddField_management(helSummary,HELacres,"DOUBLE")
 
         # What to do if value is neither?
         # Calculate HELValue Field
         helDict = dict()
         nullHEL = 0
         wrongHELvalues = list()
-        with arcpy.da.UpdateCursor(aoiCluIntersect,[helFld,HELvalueFld,"SHAPE@AREA"]) as cursor:
+        with arcpy.da.UpdateCursor(helSummary,[helFld,HELvalueFld,HELacres,"SHAPE@AREA"]) as cursor:
             for row in cursor:
                 if row[0] is None or row[0] == '':
                     nullHEL+=1
@@ -510,13 +531,17 @@ if __name__ == '__main__':
                     if not str(row[0]) in wrongHELvalues:
                         wrongHELvalues.append(str(row[0]))
 
+                acres = row[3] / acreConversion
+                row[2] = acres
+
                 # Add hel value to a dictionary to keep track of values and area
                 if not helDict.has_key(row[0]):
-                    helDict[row[0]] = row[2]
+                    helDict[row[0]] = round(acres,1)
                 else:
-                    helDict[row[0]] += row[2]
+                    helDict[row[0]] += round(acres,1)
 
                 cursor.updateRow(row)
+                del acres
 
         # Exit if no PHEL values were found
         if not helDict.has_key('PHEL'):
@@ -525,7 +550,7 @@ if __name__ == '__main__':
 
         # Inform user about NULL values
         if nullHEL:
-            AddMsgAndPrint("\n\tWARNING: There is " + str(nullHEL) + " polygon(s) with no HEL values",1)
+            AddMsgAndPrint("\n\tWARNING: There are " + str(nullHEL) + " polygon(s) with no HEL values",1)
 
         # Inform user about HEL values beyond PHEL,HEL, NHEL
         if wrongHELvalues:
@@ -534,19 +559,31 @@ if __name__ == '__main__':
                 AddMsgAndPrint("\t\t" + wrongVal)
 
         # Print Original HEL values
-        AddMsgAndPrint("\tHEL Layer Summary:")
-        for val in helDict:
-            acres = round(helDict[val] / 4046.85642,1)
-            pct = round((acres/totalIntAcres)*100,1)
-            AddMsgAndPrint("\t\t" + val + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
+        ogHELsymbologyLabels = []
+        validHELsymbologyValues = ['HEL','NHEL','PHEL']
 
+        for val in validHELsymbologyValues:
+            if val in helDict:
+                acres = helDict[val]
+                pct = round((acres/totalIntAcres)*100,1)
+                AddMsgAndPrint("\t" + val + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
+                ogHELsymbologyLabels.append(val + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
+                del acres,pct
+
+##        for val in helDict:
+##            acres = helDict[val]
+##            pct = round((acres/totalIntAcres)*100,1)
+##            AddMsgAndPrint("\t" + val + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
+##            del acres,pct
+
+        del totalIntAcres,helDict,nullHEL,wrongHELvalues
         arcpy.SetProgressorPosition()
 
         """ ---------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
         arcpy.SetProgressorLabel("Buffering AOI by 300 Meters")
         AddMsgAndPrint("\nBuffering AOI by 300 Meters")
         cluBuffer = arcpy.CreateScratchName("cluBuffer",data_type="FeatureClass",workspace=scratchWS)
-        arcpy.Buffer_analysis(cluAOI,cluBuffer,"300 Meters","FULL","ROUND")
+        arcpy.Buffer_analysis(helYesNo,cluBuffer,"300 Meters","FULL","ROUND")
         arcpy.SetProgressorPosition()
 
         """ ---------------------------------------------------------------------------------------------- Extract DEM using CLU layer"""
@@ -611,8 +648,7 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Calculating L Factor")
         AddMsgAndPrint("\tCalculating L Factor")
         lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
-        #outlFactor = Con(slope < 1,Power(Raster(flowLengthFT) / 72.5,0.2),Con((slope >=  1) & (slope < 3), Power(Raster(flowLengthFT) / 72.5,0.3), Con((slope >= 3) & (slope < 5 ), Power(Raster(flowLengthFT) / 72.5,0.4), Power(Raster(flowLengthFT) / 72.5,0.5))))
-        outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.2),Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.3),Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.4),Power(Raster(flowLengthFT) / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
+        outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.2),Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.3),Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.4),Power(Raster(flowLengthFT) / 72.6,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
         outlFactor.save(lFactor)
         arcpy.SetProgressorPosition()
 
@@ -649,7 +685,7 @@ if __name__ == '__main__':
 
         arcpy.SetProgressorLabel("Converting HEL Value field to a raster")
         AddMsgAndPrint("\tConverting HEL Value field to a raster")
-        arcpy.FeatureToRaster_conversion(aoiCluIntersect,HELvalueFld,helValue,cellSize)
+        arcpy.FeatureToRaster_conversion(helSummary,HELvalueFld,helValue,cellSize)
         arcpy.SetProgressorPosition()
 
         """---------------------------------------------------------------------------------------------- Calculate EI Factor"""
@@ -676,31 +712,31 @@ if __name__ == '__main__':
 
         #finalHEL = arcpy.CreateScratchName("finalHEL",data_type="RasterDataset",workspace=scratchWS)
         remapString = "0 8 1;8 100000000 2"
-        arcpy.Reclassify_3d(helFactor, "VALUE", remapString, finalHEL,'NODATA')
+        arcpy.Reclassify_3d(helFactor, "VALUE", remapString, finalHELmap,'NODATA')
         arcpy.SetProgressorPosition()
 
         """---------------------------------------------------------------------------------------------- Tablulate Areas"""
-        arcpy.SetProgressorLabel("Summarizing HEL values by CLUs:")
-        AddMsgAndPrint("\nSummarizing HEL values by CLUs:")
-        cluNumberFld = FindField(cluAOI,"CLUNBR")
+        arcpy.SetProgressorLabel("Computing summary of new HEL Values:")
+        AddMsgAndPrint("\nComputing summary of new HEL Values:")
+        cluNumberFld = FindField(helYesNo,"CLUNBR")
 
         outTabulate = arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
-        TabulateArea(cluAOI,cluNumberFld,finalHEL,"VALUE",outTabulate,cellSize)
+        TabulateArea(helYesNo,cluNumberFld,finalHELmap,"VALUE",outTabulate,cellSize)
 
         fieldList = [HELacres,"HEL_Pct","HEL_YES"]
         for field in fieldList:
-            if not FindField(cluAOI,field):
+            if not FindField(helYesNo,field):
                 if field == "HEL_YES":
-                    arcpy.AddField_management(cluAOI,field,"TEXT","","",5)
+                    arcpy.AddField_management(helYesNo,field,"TEXT","","",5)
                 else:
-                    arcpy.AddField_management(cluAOI,field,"FLOAT")
+                    arcpy.AddField_management(helYesNo,field,"FLOAT")
 
         fieldList.append(cluNumberFld)
         fieldList.append(calcAcreFld)
         cluDict = dict()  # ClU: (len of clu, helAcres, helPct, len of Acres, len of pct,is it HEL?)
 
         # ['HEL_Acres', 'HEL_Pct', 'HEL_YES', u'CLUNBR', 'CALCACRES']
-        with arcpy.da.UpdateCursor(cluAOI,fieldList) as cursor:
+        with arcpy.da.UpdateCursor(helYesNo,fieldList) as cursor:
             for row in cursor:
 
                 expression = arcpy.AddFieldDelimiters(outTabulate,cluNumberFld) + " = " + str(row[3])
@@ -725,6 +761,8 @@ if __name__ == '__main__':
                 cluDict[clu] = (len(str(clu)),round(helAcres,1),round(helPct,1),len(str(round(helAcres,1))),len(str(round(helPct,1))),"HEL --> " + row[2])  # {13: (2, 2.8, 37.3, 3, 4, ' HEL --> Yes')}
                 cursor.updateRow(row)
 
+                del expression,helAcres,clu,helPct
+
         # Strictly for formatting
         maxCLUlength = sorted([cluinfo[0] for clu,cluinfo in cluDict.iteritems()],reverse=True)[0]
         maxAcreLength = sorted([cluinfo[3] for clu,cluinfo in cluDict.iteritems()],reverse=True)[0]
@@ -738,31 +776,60 @@ if __name__ == '__main__':
             percent = cluDict[clu][2]
             yesOrNo = cluDict[clu][5]
 
-            AddMsgAndPrint("\tCLU #: " + str(clu) + firstSpace + " -- " + str(acres) + " .ac" + secondSpace + " -- " + str(percent) + thirdSpace + " % -- " + yesOrNo)
+            AddMsgAndPrint("\tCLU #: " + str(clu) + firstSpace + " -- HEL Acres: " + str(acres) + " .ac" + secondSpace + " -- " + str(percent) + thirdSpace + " % -- " + yesOrNo)
 
         arcpy.SetProgressorPosition()
 
         """ ---------------------------Add HEL Feature Class to ArcMap Session if available ------------------"""
         # Move the aoiCLUIntersect layer to the access
         # databaes and rename to HELSummary
-        arcpy.CopyFeatures_management(aoiCluIntersect,helSummary)
+        #arcpy.Copy_management(finalHEL,finalHELmap)
 
         try:
+            AddMsgAndPrint("\n")  # Strictly Formatting
+
+            # List of layers to add to Arcmap (layer path, arcmap layer name)
+            addToArcMap = [(finalHELmap,"Final HEL Map"),(helSummary,"HEL Summary Layer"),(helYesNo,"HEL YES NO")]
+
             # Put this section in a try-except. It will fail if run from ArcCatalog
             mxd = arcpy.mapping.MapDocument("CURRENT")
-            arcpy.MakeFeatureLayer_management(comFC2, comFL)
-            lyrFile = os.path.join( os.path.dirname(sys.argv[0]), "RedLine.lyr")
-            arcpy.ApplySymbologyFromLayer_management(comFL, lyrFile)
-            PrintMsg("Adding 'QA Common Lines' layer with " + str(iCL) + " errors to ArcMap \n ", 1)
-
-            mxd = arcpy.mapping.MapDocument("CURRENT")
             df = arcpy.mapping.ListDataFrames(mxd)[0]
-            lyr = os.path.join(cluAOI)
-            newLayer = arcpy.mapping.Layer(lyr)
-            arcpy.mapping.AddLayer(df, newLayer, "TOP")
-            arcpy.mapping.AddLayer(df, newLayer, "TOP")
-            AddMsgAndPrint("\nAdded Final HEL feature class to your ArcMap Session",0)
+
+            # redundant workaround.  ListLayers returns a list of layer objects
+            # had to create a list of layer name Strings in order to see if a
+            # specific layer exists.
+            currentLayersObj = arcpy.mapping.ListLayers(mxd)
+            currentLayersStr = [str(x) for x in arcpy.mapping.ListLayers(mxd)]
+
+            for layer in addToArcMap:
+
+                if layer[1] in currentLayersStr:
+                    arcpy.mapping.RemoveLayer(df,currentLayersObj[currentLayersStr.index(layer[1])])
+
+                if layer[1] == "Final HEL Map":
+                    tempLayer = arcpy.MakeRasterLayer_management(layer[0],layer[1])
+                else:
+                    tempLayer = arcpy.MakeFeatureLayer_management(layer[0],layer[1])
+
+                result = tempLayer.getOutput(0)
+                symbology = os.path.join(os.path.dirname(sys.argv[0]),layer[1].lower().replace(" ","") + ".lyr")
+
+                arcpy.ApplySymbologyFromLayer_management(result,symbology)
+                arcpy.mapping.AddLayer(df, result, "TOP")
+
+                # Update the HEL Summary Layer symbology to include acres and percentage.
+                if layer[1] == "HEL Summary Layer":
+                    AddMsgAndPrint("YESSSSSSS")
+                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+                    lyr.symbology.classLabels = ogHELsymbologyLabels
+                    arcpy.RefreshActiveView()
+                    arcpy.RefreshTOC()
+                    del lyr
+
+                AddMsgAndPrint("Added " + layer[1] + " to your ArcMap Session",0)
+
         except:
+            errorMsg()
             pass
 
         AddMsgAndPrint("\n")
