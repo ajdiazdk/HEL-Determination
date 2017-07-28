@@ -699,9 +699,9 @@ if __name__ == '__main__':
         """---------------------------------------------------------------------------------------------- Calculate Final HEL Factor"""
         # Con("%hel_factor%"==0,"%EI_grid%",Con("%hel_factor%"==1,9,Con("%hel_factor%"==2,2)))
         # Create Conditional statement to reflect the following:
-        # 1) HEL Value = 0 -- Take EI factor
-        # 2) HEL Value = 1 -- Assign 9
-        # 3) HEL Value = 2 -- Assign 2 (No action needed)
+        # 1) HEL Value = 0 -- Take EI factor -- Depends
+        # 2) HEL Value = 1 -- Assign 9 -- This will be HEL
+        # 3) HEL Value = 2 -- Assign 2 (No action needed) -- This will be NHEL
         # Anything above 8 is HEL
 
         arcpy.SetProgressorLabel("Calculating HEL Factor")
@@ -711,6 +711,9 @@ if __name__ == '__main__':
         outHELfactor.save(helFactor)
 
         #finalHEL = arcpy.CreateScratchName("finalHEL",data_type="RasterDataset",workspace=scratchWS)
+        # Reclassify values:
+        #       < 8 = Value_1 = NHEL
+        #       > 8 = Value_2 = HEL
         remapString = "0 8 1;8 100000000 2"
         arcpy.Reclassify_3d(helFactor, "VALUE", remapString, finalHELmap,'NODATA')
         arcpy.SetProgressorPosition()
@@ -720,8 +723,21 @@ if __name__ == '__main__':
         AddMsgAndPrint("\nComputing summary of new HEL Values:")
         cluNumberFld = FindField(helYesNo,"CLUNBR")
 
+        # Summarize the total area by CLU
         outTabulate = arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
         TabulateArea(helYesNo,cluNumberFld,finalHELmap,"VALUE",outTabulate,cellSize)
+        tabulateFields = [fld.name for fld in arcpy.ListFields(outTabulate)][2:]
+
+        if len(tabulateFields):
+            if not "VALUE_1" in tabulateFields:
+                AddMsgAndPrint("\t WARNING: Entire Area is HEL",1)
+                exit()
+            if not "VALUE_2" in tabulateFields:
+                AddMsgAndPrint("\t WARNING: Entire Area is NHEL",1)
+                exit()
+        else:
+            AddMsgAndPrint("\n\tReclassifying Failed",2)
+            exit()
 
         fieldList = [HELacres,"HEL_Pct","HEL_YES"]
         for field in fieldList:
@@ -740,7 +756,6 @@ if __name__ == '__main__':
             for row in cursor:
 
                 expression = arcpy.AddFieldDelimiters(outTabulate,cluNumberFld) + " = " + str(row[3])
-
                 helAcres = ([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"), where_clause = expression)][0])/acreConversion
 
                 # set default values
@@ -780,11 +795,7 @@ if __name__ == '__main__':
 
         arcpy.SetProgressorPosition()
 
-        """ ---------------------------Add HEL Feature Class to ArcMap Session if available ------------------"""
-        # Move the aoiCLUIntersect layer to the access
-        # databaes and rename to HELSummary
-        #arcpy.Copy_management(finalHEL,finalHELmap)
-
+        """---------------------------------------------------------------------------------------------- Prepare Symboloby for ArcMap is session exists"""
         try:
             AddMsgAndPrint("\n")  # Strictly Formatting
 
@@ -819,12 +830,42 @@ if __name__ == '__main__':
 
                 # Update the HEL Summary Layer symbology to include acres and percentage.
                 if layer[1] == "HEL Summary Layer":
-                    AddMsgAndPrint("YESSSSSSS")
                     lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
                     lyr.symbology.classLabels = ogHELsymbologyLabels
+                    lyr.visible = False
                     arcpy.RefreshActiveView()
                     arcpy.RefreshTOC()
                     del lyr
+
+                if layer[1] == "Final HEL Map":
+                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+                    newHELsymbologyLabels = []
+
+                    # This assumes that both "VALUE_1 and VALUE_2 are present
+                    HEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"))])/acreConversion
+                    NHEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1"))])/acreConversion
+                    newHELsymbologyLabels.append("HEL  -- " + str(round(HEL,1)) + " .ac -- " + str(round((HEL/(HEL + NHEL))*100,1)) + " %")
+                    newHELsymbologyLabels.append("NHEL -- " + str(round(NHEL,1)) + " .ac -- " + str(round((NHEL/(HEL + NHEL))*100,1)) + " %")
+
+                    lyr.symbology.classBreakLabels = newHELsymbologyLabels
+                    arcpy.RefreshActiveView()
+                    arcpy.RefreshTOC()
+                    del lyr,newHELsymbologyLabels
+
+                if layer[1] == "HEL YES NO":
+                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+                    #expression = """def FindLabel ([CLUNBR], [HEL_Acres], [HEL_Pct], [HEL_YES]):
+                    #    return "CLU #: " + [CLUNBR] + "\nHEL Acres: " + str(round(float([HEL_Acres]),1)) + " (" + str(round(float( [HEL_Pct] ),1)) + "%)\nHEL: " + [HEL_YES]"""
+                    #expression = """def FindLabel ( [CLUNBR], [HEL_Acres], [HEL_Pct], [HEL_YES] ):  return "CLU #: " + [CLUNBR] + "\nHEL Acres: " + str(round(float([HEL_Acres]),1)) + " (" + str(round(float( [HEL_Pct] ),1)) + "%)\nHEL: " + [HEL_YES]"""
+                    expression = """"CLU #: " & [CLUNBR] & vbNewLine & "HEL Acres: " & round([HEL_Acres] ,1) & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & "HEL: " & [HEL_YES]"""
+
+                    if lyr.supports("LABELCLASSES"):
+                        for lblClass in lyr.labelClasses:
+                            if lblClass.showClassLabels:
+                                lblClass.expression = expression
+                        lyr.showLabels = True
+                        arcpy.RefreshActiveView()
+                        arcpy.RefreshTOC()
 
                 AddMsgAndPrint("Added " + layer[1] + " to your ArcMap Session",0)
 
