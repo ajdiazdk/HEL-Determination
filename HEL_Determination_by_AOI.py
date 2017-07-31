@@ -465,7 +465,7 @@ if __name__ == '__main__':
 
         """ ---------------------------------------------------------------------------------------------- Compute Summary of original HEL values"""
 
-        # -------------------------------------------- Intersect CLU with soils
+        # ----------------------------------------------------------- Intersect CLU with soils
         arcpy.SetProgressorLabel("Computing summary of original HEL Values")
         AddMsgAndPrint("\nComputing summary of original HEL Values")
         aoiCluIntersect = arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS)
@@ -477,7 +477,7 @@ if __name__ == '__main__':
             AddMsgAndPrint("\tThere is no overlap between AOI and HEL Layer. EXITTING!",2)
             exit()
 
-        # --------------------------------------------- Dissolve intersection output by the following fields
+        # ------------------------------------------------------------ Dissolve intersection output by the following fields
         dissovleFlds = ["CLUNBR","TRACTNBR","FARMNBR","COUNTYCD"]
         for fld in dissovleFlds:
             if not FindField(helYesNo,fld):
@@ -502,7 +502,7 @@ if __name__ == '__main__':
 ##            arcpy.Delete_management(aoiCluIntersect)
 ##            aoiCluIntersect = aoiCluIntersect_sp
 
-        # --------------------------------------------- Add and Update fields in the HEL Summary Layer (HEL Value, HEL Acres)
+        # ------------------------------------------------------------ Add and Update fields in the HEL Summary Layer (HEL Value, HEL Acres)
         HELvalueFld = 'HELValue'
         HELacres = 'HEL_Acres'
         if not len(arcpy.ListFields(helSummary,HELvalueFld)) > 0:
@@ -518,6 +518,10 @@ if __name__ == '__main__':
         wrongHELvalues = list()
         with arcpy.da.UpdateCursor(helSummary,[helFld,HELvalueFld,HELacres,"SHAPE@AREA"]) as cursor:
             for row in cursor:
+
+                acres = row[3] / acreConversion
+                row[2] = acres
+
                 if row[0] is None or row[0] == '':
                     nullHEL+=1
                     continue
@@ -531,10 +535,7 @@ if __name__ == '__main__':
                     if not str(row[0]) in wrongHELvalues:
                         wrongHELvalues.append(str(row[0]))
 
-                acres = row[3] / acreConversion
-                row[2] = acres
-
-                # Add hel value to a dictionary to keep track of values and area
+                # Add hel value to dictionary to summarize by total project
                 if not helDict.has_key(row[0]):
                     helDict[row[0]] = round(acres,1)
                 else:
@@ -558,6 +559,40 @@ if __name__ == '__main__':
             for wrongVal in set(wrongHELvalues):
                 AddMsgAndPrint("\t\t" + wrongVal)
 
+         # ------------------------------------------------------------ Report HEl Layer Summary
+        ogHelSummaryStats = arcpy.CreateScratchName("ogHELSummaryStats",data_type="ArcInfoTable",workspace=scratchWS)
+        stats = [[HELacres,"SUM"]]
+        caseField = ["CLUNBR",helFld]
+        arcpy.Statistics_analysis(helSummary, ogHelSummaryStats, stats, caseField)
+        ogHELSummaryDict = dict()
+        sumHELacreFld = [fld.name for fld in arcpy.ListFields(ogHelSummaryStats)][0]
+
+        with arcpy.da.SearchCursor(ogHelSummaryStats,["CLUNBR",helFld,sumHELacreFld]) as cursor:
+            for row in cursor:
+                clu = row[0]
+                helval = row[1]
+                helacres = row[2]
+
+                ogHELSummaryDict[clu] = (len(str(clu)),helval,len(helval),round(helacres,1),len(str(round(helacres,1))))
+                del clu,helval,helacres
+
+        # Strictly for formatting
+        maxCLUlength = sorted([cluinfo[0] for clu,cluinfo in ogHELSummaryDict.iteritems()],reverse=True)[0]
+        maxHELvalue = sorted([cluinfo[2] for clu,cluinfo in ogHELSummaryDict.iteritems()],reverse=True)[0]
+        maxAcreLength = sorted([cluinfo[4] for clu,cluinfo in ogHELSummaryDict.iteritems()],reverse=True)[0]
+        AddMsgAndPrint("\tSummary by CLU:")
+
+        for clu in ogHELSummaryDict:
+            firstSpace = " " * (maxCLUlength - ogHELSummaryDict[clu][0])
+            secondSpace = " "  * (maxHELvalue - ogHELSummaryDict[clu][2])
+            thirdSpace = " " * (maxAcreLength - ogHELSummaryDict[clu][4])
+            helval = ogHELSummaryDict[clu][1]
+            acres = ogHELSummaryDict[clu][3]
+
+            AddMsgAndPrint("\t\tCLU #: " + str(clu))
+            AddMsgAndPrint("\t\t\t" + helval + firstSpace + " -- Acres: " + str(acres) + " .ac")
+
+
         # Print Original HEL values
         ogHELsymbologyLabels = []
         validHELsymbologyValues = ['HEL','NHEL','PHEL']
@@ -576,9 +611,9 @@ if __name__ == '__main__':
 ##            AddMsgAndPrint("\t" + val + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
 ##            del acres,pct
 
-        del totalIntAcres,helDict,nullHEL,wrongHELvalues
+        #del totalIntAcres,helDict,nullHEL,wrongHELvalues
         arcpy.SetProgressorPosition()
-
+        exit()
         """ ---------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
         arcpy.SetProgressorLabel("Buffering AOI by 300 Meters")
         AddMsgAndPrint("\nBuffering AOI by 300 Meters")
