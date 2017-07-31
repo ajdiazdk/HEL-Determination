@@ -301,14 +301,14 @@ if __name__ == '__main__':
     inputDEM = arcpy.GetParameter(7)
     zUnits = arcpy.GetParameterAsText(8)
 
-    AOI = r'C:\python_scripts\HEL_MN\Sample\CLU_subset3.shp'
-    cluLayer = r'C:\python_scripts\HEL_MN\Sample\clu_sample.shp'
-    helLayer = r'C:\python_scripts\HEL_MN\Sample\HEL_sample.shp'
+    AOI = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\CLU_subset3.shp'
+    cluLayer = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\clu_sample.shp'
+    helLayer = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\HEL_sample.shp'
     kFactorFld = "K"
     tFactorFld = "T"
     rFactorFld = "R"
     helFld = "HEL"
-    inputDEM = r'C:\python_scripts\HEL_MN\Sample\dem_03'
+    inputDEM = r'G:\ESRI_stuff\python_scripts\Kevin Godsey\HEL\Sample\dem_03'
     zUnits = ""
 
     try:
@@ -478,6 +478,7 @@ if __name__ == '__main__':
             exit()
 
         # ------------------------------------------------------------ Dissolve intersection output by the following fields
+        cluNumberFld = "CLUNBR"
         dissovleFlds = ["CLUNBR","TRACTNBR","FARMNBR","COUNTYCD"]
         for fld in dissovleFlds:
             if not FindField(helYesNo,fld):
@@ -488,23 +489,11 @@ if __name__ == '__main__':
         dissovleFlds.append(helFld)
         arcpy.Dissolve_management(aoiCluIntersect, helSummary, dissovleFlds, "","SINGLE_PART", "DISSOLVE_LINES")
 
-##        #Check for Multipart features.  Explode if multipart features exist
-##        bMultipart = False
-##        geometries = arcpy.CopyFeatures_management(aoiCluIntersect,arcpy.Geometry())
-##        for geometry in geometries:
-##            if geometry.isMultipart:
-##                bMultipart = True
-##                break
-##
-##        if bMultipart:
-##            aoiCluIntersect_sp = arcpy.CreateScratchName("aoiCLUIntersect_sp",data_type="FeatureClass",workspace=scratchWS)
-##            arcpy.MultipartToSinglepart_management(aoiCluIntersect,aoiCluIntersect_sp)
-##            arcpy.Delete_management(aoiCluIntersect)
-##            aoiCluIntersect = aoiCluIntersect_sp
 
         # ------------------------------------------------------------ Add and Update fields in the HEL Summary Layer (HEL Value, HEL Acres)
         HELvalueFld = 'HELValue'
         HELacres = 'HEL_Acres'
+
         if not len(arcpy.ListFields(helSummary,HELvalueFld)) > 0:
             arcpy.AddField_management(helSummary,HELvalueFld,"SHORT")
 
@@ -516,11 +505,14 @@ if __name__ == '__main__':
         helDict = dict()
         nullHEL = 0
         wrongHELvalues = list()
+        maxAcreLength = list()
+
         with arcpy.da.UpdateCursor(helSummary,[helFld,HELvalueFld,HELacres,"SHAPE@AREA"]) as cursor:
             for row in cursor:
 
                 acres = row[3] / acreConversion
                 row[2] = acres
+                maxAcreLength.append(acres)
 
                 if row[0] is None or row[0] == '':
                     nullHEL+=1
@@ -559,61 +551,60 @@ if __name__ == '__main__':
             for wrongVal in set(wrongHELvalues):
                 AddMsgAndPrint("\t\t" + wrongVal)
 
-         # ------------------------------------------------------------ Report HEl Layer Summary
+        del dissovleFlds,nullHEL,wrongHELvalues
+
+         # ------------------------------------------------------------ Report HEl Layer Summary by CLU
         ogHelSummaryStats = arcpy.CreateScratchName("ogHELSummaryStats",data_type="ArcInfoTable",workspace=scratchWS)
+        ogHelSummaryStatsPivot = arcpy.CreateScratchName("ogHELSummaryStatsPivot",data_type="ArcInfoTable",workspace=scratchWS)
+
         stats = [[HELacres,"SUM"]]
-        caseField = ["CLUNBR",helFld]
+        caseField = [cluNumberFld,helFld]
         arcpy.Statistics_analysis(helSummary, ogHelSummaryStats, stats, caseField)
-        ogHELSummaryDict = dict()
-        sumHELacreFld = [fld.name for fld in arcpy.ListFields(ogHelSummaryStats)][0]
 
-        with arcpy.da.SearchCursor(ogHelSummaryStats,["CLUNBR",helFld,sumHELacreFld]) as cursor:
+        sumHELacreFld = [fld.name for fld in arcpy.ListFields(ogHelSummaryStats,"*" + HELacres)][0]
+        arcpy.PivotTable_management(ogHelSummaryStats,cluNumberFld,helFld,sumHELacreFld,ogHelSummaryStatsPivot)
+
+        pivotFields = [fld.name for fld in arcpy.ListFields(ogHelSummaryStatsPivot)][1:]  # ['CLUNBR','HEL','NHEL','PHEL']
+        numOfhelValues = len(pivotFields)
+        maxAcreLength.sort(reverse=True)
+        AddMsgAndPrint("\n\tSummary by CLU:")
+
+        with arcpy.da.SearchCursor(ogHelSummaryStatsPivot,pivotFields) as cursor:
             for row in cursor:
-                clu = row[0]
-                helval = row[1]
-                helacres = row[2]
 
-                ogHELSummaryDict[clu] = (len(str(clu)),helval,len(helval),round(helacres,1),len(str(round(helacres,1))))
-                del clu,helval,helacres
+                AddMsgAndPrint("\t\tCLU #: " + str(row[0]))
+                cluAcres = sum([row[i] for i in range(1,numOfhelValues,1)])
 
-        # Strictly for formatting
-        maxCLUlength = sorted([cluinfo[0] for clu,cluinfo in ogHELSummaryDict.iteritems()],reverse=True)[0]
-        maxHELvalue = sorted([cluinfo[2] for clu,cluinfo in ogHELSummaryDict.iteritems()],reverse=True)[0]
-        maxAcreLength = sorted([cluinfo[4] for clu,cluinfo in ogHELSummaryDict.iteritems()],reverse=True)[0]
-        AddMsgAndPrint("\tSummary by CLU:")
+                for i in range(1,numOfhelValues,1):
+                    acres =  str(round(row[i],1))
+                    pct = round((row[i] / cluAcres) * 100,1)
+                    firstSpace = " " * (4-len(pivotFields[i])) # PHEL has 4 characters
+                    secondSpace = " " * (len(str(round(maxAcreLength[0],1))) - len(acres))
+                    AddMsgAndPrint("\t\t\t" + pivotFields[i] + firstSpace + " -- " + str(acres) + secondSpace + " .ac -- " + str(pct) + " %")
+                    del acres,pct,firstSpace
+                del cluAcres
 
-        for clu in ogHELSummaryDict:
-            firstSpace = " " * (maxCLUlength - ogHELSummaryDict[clu][0])
-            secondSpace = " "  * (maxHELvalue - ogHELSummaryDict[clu][2])
-            thirdSpace = " " * (maxAcreLength - ogHELSummaryDict[clu][4])
-            helval = ogHELSummaryDict[clu][1]
-            acres = ogHELSummaryDict[clu][3]
+        del stats,caseField,sumHELacreFld,pivotFields,numOfhelValues,maxAcreLength
 
-            AddMsgAndPrint("\t\tCLU #: " + str(clu))
-            AddMsgAndPrint("\t\t\t" + helval + firstSpace + " -- Acres: " + str(acres) + " .ac")
-
-
-        # Print Original HEL values
+         # ------------------------------------------------------------ Report HEl Layer Summary by Project AOI
         ogHELsymbologyLabels = []
         validHELsymbologyValues = ['HEL','NHEL','PHEL']
+        maxAcreLength = len(str(sorted([acres for val,acres in helDict.iteritems()],reverse=True)[0]))
+        AddMsgAndPrint("\n\tSummary by AOI:")
 
         for val in validHELsymbologyValues:
             if val in helDict:
                 acres = helDict[val]
                 pct = round((acres/totalIntAcres)*100,1)
-                AddMsgAndPrint("\t" + val + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
-                ogHELsymbologyLabels.append(val + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
-                del acres,pct
+                firstSpace = " " * (4-len(val)) # PHEL has 4 characters
+                secondSpace = " " * (maxAcreLength - len(str(acres)))
+                AddMsgAndPrint("\t\t" + val + firstSpace + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
+                ogHELsymbologyLabels.append(val + " -- " + str(acres) +  secondSpace + " .ac -- " + str(pct) + " %")
+                del acres,pct,firstSpace,secondSpace
 
-##        for val in helDict:
-##            acres = helDict[val]
-##            pct = round((acres/totalIntAcres)*100,1)
-##            AddMsgAndPrint("\t" + val + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
-##            del acres,pct
-
-        #del totalIntAcres,helDict,nullHEL,wrongHELvalues
+        del totalIntAcres,helDict,validHELsymbologyValues,maxAcreLength
         arcpy.SetProgressorPosition()
-        exit()
+
         """ ---------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
         arcpy.SetProgressorLabel("Buffering AOI by 300 Meters")
         AddMsgAndPrint("\nBuffering AOI by 300 Meters")
@@ -756,7 +747,6 @@ if __name__ == '__main__':
         """---------------------------------------------------------------------------------------------- Tablulate Areas"""
         arcpy.SetProgressorLabel("Computing summary of new HEL Values:")
         AddMsgAndPrint("\nComputing summary of new HEL Values:")
-        cluNumberFld = FindField(helYesNo,"CLUNBR")
 
         # Summarize the total area by CLU
         outTabulate = arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
