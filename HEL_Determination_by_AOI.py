@@ -505,9 +505,9 @@ if __name__ == '__main__':
                 exit()
 
         dissovleFlds.append(helFld)
-        arcpy.Dissolve_management(aoiCluIntersect, helSummary, dissovleFlds, "","SINGLE_PART", "DISSOLVE_LINES")
+        arcpy.Dissolve_management(aoiCluIntersect, helSummary, dissovleFlds, "","MULTI_PART", "DISSOLVE_LINES")
 
-        # --------------------------------------------------------------------------- Add and Update fields in the HEL Summary Layer (HEL Value, HEL Acres)
+        # --------------------------------------------------------------------------- Add and Update fields in the HEL Summary Layer (HEL Value, HEL Acres, HEL_Pct)
         HELvalueFld = 'HELValue'
         HELacres = 'HEL_Acres'
 
@@ -882,36 +882,37 @@ if __name__ == '__main__':
                 arcpy.ApplySymbologyFromLayer_management(result,symbology)
                 arcpy.mapping.AddLayer(df, result, "TOP")
 
-                # Update the HEL Summary Layer symbology to include acres and percentage.
-                if layer[1] == "HEL Summary Layer":
-                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-                    lyr.symbology.classLabels = ogHELsymbologyLabels
-                    lyr.visible = False
-                    arcpy.RefreshActiveView()
-                    arcpy.RefreshTOC()
-                    del lyr
+                """ The following code will update the layer symbology for HEL Summary Layer
+                    to include AOI acres and percentage.  It was decided to exclude this."""
+##                if layer[1] == "HEL Summary Layer":
+##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+##                    lyr.symbology.classLabels = ogHELsymbologyLabels
+##                    lyr.visible = False
+##                    arcpy.RefreshActiveView()
+##                    arcpy.RefreshTOC()
+##                    del lyr
 
-                if layer[1] == "Final HEL Map":
-                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-                    newHELsymbologyLabels = []
-
-                    # This assumes that both "VALUE_1 and VALUE_2 are present
-                    HEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"))])/acreConversion
-                    NHEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1"))])/acreConversion
-                    newHELsymbologyLabels.append("HEL  -- " + str(round(HEL,1)) + " .ac -- " + str(round((HEL/(HEL + NHEL))*100,1)) + " %")
-                    newHELsymbologyLabels.append("NHEL -- " + str(round(NHEL,1)) + " .ac -- " + str(round((NHEL/(HEL + NHEL))*100,1)) + " %")
-
-                    lyr.symbology.classBreakLabels = newHELsymbologyLabels
-                    arcpy.RefreshActiveView()
-                    arcpy.RefreshTOC()
-                    del lyr,newHELsymbologyLabels
+                """ The following code will update the layer symbology for the Final HEL Map
+                    Layer to include AOI acres and percentage.  It was decided to exclude this."""
+##                if layer[1] == "Final HEL Map":
+##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+##                    newHELsymbologyLabels = []
+##
+##                    # This assumes that both "VALUE_1 and VALUE_2 are present
+##                    HEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"))])/acreConversion
+##                    NHEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1"))])/acreConversion
+##                    newHELsymbologyLabels.append("HEL  -- " + str(round(HEL,1)) + " .ac -- " + str(round((HEL/(HEL + NHEL))*100,1)) + " %")
+##                    newHELsymbologyLabels.append("NHEL -- " + str(round(NHEL,1)) + " .ac -- " + str(round((NHEL/(HEL + NHEL))*100,1)) + " %")
+##
+##                    lyr.symbology.classBreakLabels = newHELsymbologyLabels
+##                    arcpy.RefreshActiveView()
+##                    arcpy.RefreshTOC()
+##                    del lyr,newHELsymbologyLabels
 
                 if layer[1] == "HEL YES NO":
                     lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-                    #expression = """def FindLabel ([CLUNBR], [HEL_Acres], [HEL_Pct], [HEL_YES]):
-                    #    return "CLU #: " + [CLUNBR] + "\nHEL Acres: " + str(round(float([HEL_Acres]),1)) + " (" + str(round(float( [HEL_Pct] ),1)) + "%)\nHEL: " + [HEL_YES]"""
                     #expression = """def FindLabel ( [CLUNBR], [HEL_Acres], [HEL_Pct], [HEL_YES] ):  return "CLU #: " + [CLUNBR] + "\nHEL Acres: " + str(round(float([HEL_Acres]),1)) + " (" + str(round(float( [HEL_Pct] ),1)) + "%)\nHEL: " + [HEL_YES]"""
-                    expression = """"CLU #: " & [CLUNBR] & vbNewLine & "HEL Acres: " & round([HEL_Acres] ,1) & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & "HEL: " & [HEL_YES]"""
+                    expression = """""TRCT #: " & [TRACTNBR] & vbNewLine & "CLU #: " & [CLUNBR] & vbNewLine & "Acres: " & round([CALCACRES],1) & vbNewLine & "HEL Acres: " & round([HEL_Acres] ,1) & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & "HEL: " & [HEL_YES]"""
 
                     if lyr.supports("LABELCLASSES"):
                         for lblClass in lyr.labelClasses:
