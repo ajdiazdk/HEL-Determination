@@ -303,6 +303,7 @@ def removeScratchLayers():
 ## =============================================== Main Body ====================================================
 
 import sys, string, os, locale, traceback, urllib, re, arcpy, operator, getpass
+import subprocess
 from arcpy import env
 from arcpy.sa import *
 
@@ -331,13 +332,13 @@ if __name__ == '__main__':
     try:
 
         """ ---------------------------------------------------------------------------------------------- Check HEL Access Database"""
-        # Make sure the HEL access database is present, Exit otherwise
+        # ------------------------------------------------------------ Make sure the HEL access database is present, Exit otherwise
         helDatabase = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.mdb'
         if not arcpy.Exists(helDatabase):
             AddMsgAndPrint("\nHEL Access Database does not exist in the same path as HEL Tools",2)
             exit()
 
-        # Set the path to the final HEL_YES_NO layer.  Essentially derived from user AOI
+        # ----------------------------------------- Set the path to the final HEL_YES_NO layer.  Essentially derived from user AOI
         helYesNo = os.path.join(helDatabase, r'HEL_YES_NO')
         helSummary = os.path.join(helDatabase, r'HELSummaryLayer')
         finalHELmap = os.path.join(helDatabase, r'finalhelmap')
@@ -363,15 +364,33 @@ if __name__ == '__main__':
                 AddMsgAndPrint("\nCould not delete the 'Final_HEL_Map' raster layer in the HEL access database. Creating an additional layer",2)
                 finalHELmap = arcpy.CreateScratchName("finalhelmap", data_type="RasterDataset", workspace=helDatabase)
 
+        # --------------------------------------------------------- determine Microsoft Access path from windows version
+        isAccess = True
+        winVersion = sys.getwindowsversion()
+
+        # Windows 10
+        if winVersion.build == 9200:
+            msAccessPath = r'C:\Program Files (x86)\Microsoft Office\root\Office16\MSACCESS.EXE'
+        # Windows 7
+        elif winVersion.build == 7601:
+            msAccessPath = r'C:\Program Files (x86)\Microsoft Office\Office15\MSACCESS.EXE'
+        else:
+            AddMsgAndPrint("\nCould not determine Windows version, will not populate 026 Form",2)
+            isAccess = False
+
+        if isAccess and not os.path.isfile(msAccessPath):
+            isAccess = False
+            AddMsgAndPrint("\nCould not locate Microsoft Access Software, will not populate 026 Form",2)
+
         arcpy.env.overwriteOutput = True
 
-        """ ---------------------------------------------------------------------------------------------- Routine Shit"""
+        """ ---------------------------------------------------------------------------------------------- Routine Stuff"""
         # Check Availability of Spatial Analyst Extension
         try:
             if arcpy.CheckExtension("Spatial") == "Available":
                 arcpy.CheckOutExtension("Spatial")
             else:
-                raise ExitError,"\n\nSpatial Analyst license is unavailable.  May need to turn it on!"
+                AddMsgAndPrint("\n\nSpatial Analyst license is unavailable.  May need to turn it on!",2)
 
         except LicenseError:
             AddMsgAndPrint("\n\nSpatial Analyst license is unavailable.  May need to turn it on!",2)
@@ -391,7 +410,7 @@ if __name__ == '__main__':
         if not scratchWS:
             exit()
 
-        """ ---------------------------------------------------------------------------------------------- Prepare CLU Layer"""
+        """ ------------------------------------------------------------------------------------- Prepare CLU Layer; Determine where AOI is coming from"""
         descAOI = arcpy.Describe(AOI)
         aoiPath = descAOI.catalogPath
         cluLayerPath = arcpy.Describe(cluLayer).catalogPath
@@ -429,7 +448,7 @@ if __name__ == '__main__':
         units = sr.LinearUnitName
         cellSize = desc.MeanCellWidth
 
-        AddMsgAndPrint("\nGathering information about DEM: \"" + os.path.basename(inputDEMPath) + "\"")
+        AddMsgAndPrint("\nGathering information about DEM: " + os.path.basename(inputDEMPath))
 
         if units == "Meter":
             units = "Meters"
@@ -473,7 +492,7 @@ if __name__ == '__main__':
             AddMsgAndPrint("\tZ-Factor: " + str(Zfactor) )
 
         else:
-            AddMsgAndPrint("\n\n\t" + os.path.basename(inputDEM) + " is NOT in a projected Coordinate System....EXITING",2)
+            AddMsgAndPrint("\n\n\t" + os.path.basename(inputDEMPath) + " is NOT in a projected Coordinate System....EXITING",2)
             exit()
 
         arcpy.SetProgressor("step", "Calculating HEL Determination", 0, 17, 1)
@@ -497,7 +516,7 @@ if __name__ == '__main__':
 
         # ---------------------------------------------------------------------------Dissolve intersection output by the following fields
         cluNumberFld = "CLUNBR"
-        dissovleFlds = ["CLUNBR","TRACTNBR","FARMNBR","COUNTYCD"]
+        dissovleFlds = ["CLUNBR","TRACTNBR","FARMNBR","COUNTYCD","CALCACRES"]
         for fld in dissovleFlds:
             if not FindField(helYesNo,fld):
                 AddMsgAndPrint("\n\tMissing CLU Layer field: " + fld,2)
@@ -510,12 +529,16 @@ if __name__ == '__main__':
         # --------------------------------------------------------------------------- Add and Update fields in the HEL Summary Layer (HEL Value, HEL Acres, HEL_Pct)
         HELvalueFld = 'HELValue'
         HELacres = 'HEL_Acres'
+        HELacrePct = 'HEL_AcrePct'
 
         if not len(arcpy.ListFields(helSummary,HELvalueFld)) > 0:
             arcpy.AddField_management(helSummary,HELvalueFld,"SHORT")
 
         if not len(arcpy.ListFields(helSummary,HELacres)) > 0:
             arcpy.AddField_management(helSummary,HELacres,"DOUBLE")
+
+        if not len(arcpy.ListFields(helSummary,HELacrePct)) > 0:
+            arcpy.AddField_management(helSummary,HELacrePct,"DOUBLE")
 
         # What to do if value is neither?
         # Calculate HELValue Field
@@ -524,12 +547,13 @@ if __name__ == '__main__':
         wrongHELvalues = list()
         maxAcreLength = list()
 
-        with arcpy.da.UpdateCursor(helSummary,[helFld,HELvalueFld,HELacres,"SHAPE@AREA"]) as cursor:
+        with arcpy.da.UpdateCursor(helSummary,[helFld,HELvalueFld,HELacres,"SHAPE@AREA",HELacrePct,calcAcreFld]) as cursor:
             for row in cursor:
 
                 acres = row[3] / acreConversion
                 row[2] = acres
                 maxAcreLength.append(acres)
+                row[4] = round((row[2] / row[5]) * 100,1) # HEL acre percentage
 
                 if row[0] is None or row[0] == '':
                     nullHEL+=1
@@ -570,7 +594,8 @@ if __name__ == '__main__':
 
         del dissovleFlds,nullHEL,wrongHELvalues
 
-         # --------------------------------------------------------------------------- Report HEl Layer Summary by CLU
+        # --------------------------------------------------------------------------------------------------------- Report HEl Layer Summary by CLU
+        # Create 2 temporary tables to capture summary statistics
         ogHelSummaryStats = arcpy.CreateScratchName("ogHELSummaryStats",data_type="ArcInfoTable",workspace=scratchWS)
         ogHelSummaryStatsPivot = arcpy.CreateScratchName("ogHELSummaryStatsPivot",data_type="ArcInfoTable",workspace=scratchWS)
 
@@ -851,7 +876,7 @@ if __name__ == '__main__':
 
         """---------------------------------------------------------------------------------------------- Prepare Symboloby for ArcMap is session exists"""
         try:
-            AddMsgAndPrint("\n")  # Strictly Formatting
+            #AddMsgAndPrint("\n")  # Strictly Formatting
 
             # List of layers to add to Arcmap (layer path, arcmap layer name)
             addToArcMap = [(finalHELmap,"Final HEL Map"),(helSummary,"HEL Summary Layer"),(helYesNo,"HEL YES NO")]
@@ -862,7 +887,7 @@ if __name__ == '__main__':
 
             # redundant workaround.  ListLayers returns a list of layer objects
             # had to create a list of layer name Strings in order to see if a
-            # specific layer exists.
+            # specific layer currently exists in Arcmap.
             currentLayersObj = arcpy.mapping.ListLayers(mxd)
             currentLayersStr = [str(x) for x in arcpy.mapping.ListLayers(mxd)]
 
@@ -912,7 +937,7 @@ if __name__ == '__main__':
                 if layer[1] == "HEL YES NO":
                     lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
                     #expression = """def FindLabel ( [CLUNBR], [HEL_Acres], [HEL_Pct], [HEL_YES] ):  return "CLU #: " + [CLUNBR] + "\nHEL Acres: " + str(round(float([HEL_Acres]),1)) + " (" + str(round(float( [HEL_Pct] ),1)) + "%)\nHEL: " + [HEL_YES]"""
-                    expression = """""TRCT #: " & [TRACTNBR] & vbNewLine & "CLU #: " & [CLUNBR] & vbNewLine & "Acres: " & round([CALCACRES],1) & vbNewLine & "HEL Acres: " & round([HEL_Acres] ,1) & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & "HEL: " & [HEL_YES]"""
+                    expression = """"TRCT #: " & [TRACTNBR] & vbNewLine & "CLU #: " & [CLUNBR] & vbNewLine & "Acres: " & round([CALCACRES],1) & vbNewLine & "HEL Acres: " & round([HEL_Acres] ,1) & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & "HEL: " & [HEL_YES]"""
 
                     if lyr.supports("LABELCLASSES"):
                         for lblClass in lyr.labelClasses:
@@ -925,7 +950,39 @@ if __name__ == '__main__':
                 AddMsgAndPrint("Added " + layer[1] + " to your ArcMap Session",0)
 
         except:
-            pass
+            errorMsg()
+
+        """---------------------------------------------------------------------------------------------- Prepare 026 Form"""
+        # Add 18 Fields to the helYesNo feature class
+        if isAccess:
+
+            fieldDict = {"Signature":("TEXT",""),"SoilAvailable":("TEXT","Yes",5),"Completion":("TEXT","Office",10),
+                            "SodbustField":("TEXT","No",5),"Delivery":("TEXT","Mail",10),"Remarks":("TEXT",
+                            "This preliminary determination was conducted off-site with LiDAR data only if PHEL mapunits are present.",110),
+                            "RequestDate":("DATE",""),"LastName":("TEXT",""),"FirstName":("TEXT",""),"Address":("TEXT",""),
+                            "City":("TEXT",""),"ZipCode":("TEXT",""),"Request_from":("TEXT","Landowner",15),"HELFarm":("TEXT","Yes",5),
+                            "Determination_Date":("DATE","Now (  )"),"state":("TEXT",""),"SodbustTract":("TEXT","No",5),"Lidar":("TEXT","Yes",5)}
+
+            AddMsgAndPrint("\nPreparing and Populating 026 Form", 0)
+            arcpy.SetProgressor("step", "Preparing and Populating 026 Form", 0, len(fieldDict), 1)
+
+            for field,params in fieldDict.iteritems():
+                arcpy.SetProgressorLabel("Adding Field: " + field)
+                try:
+                    fldLength = params[2]
+                except:
+                    fldLength = 0
+                    pass
+
+                arcpy.AddField_management(helYesNo,field,params[0],"#","#",fldLength)
+
+                if len(params[1]) > 0:
+                    expression = "\"" + params[1] + "\""
+                    arcpy.CalculateField_management(helYesNo,field,expression,"VB")
+                arcpy.SetProgressorPosition()
+
+            AddMsgAndPrint("Opening 026 Form",0)
+            subprocess.Popen([msAccessPath,helDatabase])
 
         arcpy.SetProgressorLabel("Removing Temp Layers")
         AddMsgAndPrint("\nRemoving Temp Layers")
