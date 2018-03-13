@@ -318,6 +318,8 @@ if __name__ == '__main__':
     helFld = arcpy.GetParameterAsText(6)
     inputDEM = arcpy.GetParameter(7)
     zUnits = arcpy.GetParameterAsText(8)
+    state = arcpy.GetParameterAsText(9)
+    dcSignature = arcpy.GetParameterAsText(10)
 
 ##    AOI = r'C:\python_scripts\HEL_MN\Sample\CLU_subset2.shp'
 ##    cluLayer = r'C:\python_scripts\HEL_MN\Sample\clu_sample.shp'
@@ -384,7 +386,7 @@ if __name__ == '__main__':
 
         arcpy.env.overwriteOutput = True
 
-        """ ---------------------------------------------------------------------------------------------- Routine Stuff"""
+        """ ------------------------------------------------------------------------------------------------------------------------ Routine Stuff"""
         # Check Availability of Spatial Analyst Extension
         try:
             if arcpy.CheckExtension("Spatial") == "Available":
@@ -579,8 +581,7 @@ if __name__ == '__main__':
 
         # Exit if no PHEL values were found
         if not helDict.has_key('PHEL'):
-            AddMsgAndPrint("\n\tThere are no PHEL values in HEL layer.  No need to proceed.  Exiting!",2)
-            exit()
+            AddMsgAndPrint("\n\tWARNING: There are no PHEL values in HEL layer",1)
 
         # Inform user about NULL values
         if nullHEL:
@@ -698,7 +699,7 @@ if __name__ == '__main__':
         scratchLayers.append((cluBuffer,demExtract,slope,flowDirection,flowLength,outflowLengthFT))
 
         """------------------------------------------------------------------------------------------------------------- Calculate LS Factor"""
-        # Calculate S Factor
+        # ------------------------------------------------------------------------------- Calculate S Factor
         # ((0.065 +( 0.0456 * ("%slope%"))) +( 0.006541 * (Power("%slope%",2))))
         arcpy.SetProgressorLabel("Calculating S Factor")
         AddMsgAndPrint("\tCalculating S Factor")
@@ -707,7 +708,7 @@ if __name__ == '__main__':
         outsFactor.save(sFactor)
         arcpy.SetProgressorPosition()
 
-        # Calculate L Factor
+        # ------------------------------------------------------------------------------ Calculate L Factor
         # Con("%slope%" < 1,Power("%FlowLenft%" / 72.5,0.2) ,Con(("%slope%" >=  1) &("%slope%" < 3) ,Power("%FlowLenft%" / 72.5,0.3), Con(("%slope%" >= 3) &("%slope%" < 5 ),Power("%FlowLenft%" / 72.5,0.4) ,Power("%FlowLenft%" / 72.5,0.5))))
         # 1) slope < 1      --  Power 0.2
         # 2) 1 < slope < 3  --  Power 0.3
@@ -717,11 +718,16 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Calculating L Factor")
         AddMsgAndPrint("\tCalculating L Factor")
         lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
-        outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.2),Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.3),Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.4),Power(Raster(flowLengthFT) / 72.6,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
+
+        outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.2),
+                        Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.3),
+                        Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.4),
+                        Power(Raster(flowLengthFT) / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
         outlFactor.save(lFactor)
+
         arcpy.SetProgressorPosition()
 
-        # Calculate LS Factor
+        # ----------------------------------------------------------------------------- Calculate LS Factor
         # "%l_factor%" * "%s_factor%"
         arcpy.SetProgressorLabel("Calculating LS Factor")
         AddMsgAndPrint("\tCalculating LS Factor")
@@ -788,7 +794,6 @@ if __name__ == '__main__':
         remapString = "0 8 1;8 100000000 2"
         arcpy.Reclassify_3d(helFactor, "VALUE", remapString, finalHELmap,'NODATA')
         arcpy.SetProgressorPosition()
-
 
         """------------------------------------------------------------------------------------------------------------- Compute Summary of NEW HEL values"""
         arcpy.SetProgressorLabel("Computing summary of new HEL Values:")
@@ -909,13 +914,13 @@ if __name__ == '__main__':
 
                 """ The following code will update the layer symbology for HEL Summary Layer
                     to include AOI acres and percentage.  It was decided to exclude this."""
-##                if layer[1] == "HEL Summary Layer":
-##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-##                    lyr.symbology.classLabels = ogHELsymbologyLabels
-##                    lyr.visible = False
-##                    arcpy.RefreshActiveView()
-##                    arcpy.RefreshTOC()
-##                    del lyr
+                if layer[1] == "HEL Summary Layer":
+                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+                    lyr.symbology.classLabels = ogHELsymbologyLabels
+                    lyr.visible = False
+                    arcpy.RefreshActiveView()
+                    arcpy.RefreshTOC()
+                    del lyr
 
                 """ The following code will update the layer symbology for the Final HEL Map
                     Layer to include AOI acres and percentage.  It was decided to exclude this."""
@@ -956,12 +961,12 @@ if __name__ == '__main__':
         # Add 18 Fields to the helYesNo feature class
         if isAccess:
 
-            fieldDict = {"Signature":("TEXT",""),"SoilAvailable":("TEXT","Yes",5),"Completion":("TEXT","Office",10),
+            fieldDict = {"Signature":("TEXT",dcSignature,50),"SoilAvailable":("TEXT","Yes",5),"Completion":("TEXT","Office",10),
                             "SodbustField":("TEXT","No",5),"Delivery":("TEXT","Mail",10),"Remarks":("TEXT",
                             "This preliminary determination was conducted off-site with LiDAR data only if PHEL mapunits are present.",110),
-                            "RequestDate":("DATE",""),"LastName":("TEXT",""),"FirstName":("TEXT",""),"Address":("TEXT",""),
-                            "City":("TEXT",""),"ZipCode":("TEXT",""),"Request_from":("TEXT","Landowner",15),"HELFarm":("TEXT","Yes",5),
-                            "Determination_Date":("DATE","Now (  )"),"state":("TEXT",""),"SodbustTract":("TEXT","No",5),"Lidar":("TEXT","Yes",5)}
+                            "RequestDate":("DATE",""),"LastName":("TEXT","",50),"FirstName":("TEXT","",25),"Address":("TEXT","",50),
+                            "City":("TEXT","",25),"ZipCode":("TEXT","",10),"Request_from":("TEXT","Landowner",15),"HELFarm":("TEXT","Yes",5),
+                            "Determination_Date":("DATE","Now (  )"),"state":("TEXT",state,2),"SodbustTract":("TEXT","No",5),"Lidar":("TEXT","Yes",5)}
 
             AddMsgAndPrint("\nPreparing and Populating 026 Form", 0)
             arcpy.SetProgressor("step", "Preparing and Populating 026 Form", 0, len(fieldDict), 1)
