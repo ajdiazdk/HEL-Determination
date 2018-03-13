@@ -14,7 +14,7 @@
 # phone: 608.662.4422 ext. 190
 #
 # Created:     7/04/2016
-# Last Modified: 5/18/2017
+# Last Modified: 3/12/2018
 # Copyright:   (c) Adolfo.Diaz 2016
 
 #-------------------------------------------------------------------------------
@@ -950,7 +950,7 @@ if __name__ == '__main__':
                 AddMsgAndPrint("Added " + layer[1] + " to your ArcMap Session",0)
 
         except:
-            errorMsg()
+            pass
 
         """---------------------------------------------------------------------------------------------- Prepare 026 Form"""
         # Add 18 Fields to the helYesNo feature class
