@@ -803,7 +803,7 @@ if __name__ == '__main__':
         outTabulate = arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
         TabulateArea(helYesNo,cluNumberFld,finalHELmap,"VALUE",outTabulate,cellSize)
         tabulateFields = [fld.name for fld in arcpy.ListFields(outTabulate)][2:]
-        scratchLayers.append((eiFactor,helFactor))#,outTabulate))
+        scratchLayers.append((eiFactor,helFactor,outTabulate))
 
         if len(tabulateFields):
             if not "VALUE_1" in tabulateFields:
