@@ -513,7 +513,7 @@ if __name__ == '__main__':
         # Test intersection
         totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(aoiCluIntersect, ("SHAPE@AREA"))]) / acreConversion
         if not totalIntAcres:
-            AddMsgAndPrint("\tThere is no overlap between AOI and HEL Layer. EXITTING!",2)
+            AddMsgAndPrint("\tThere is no overlap between AOI and CLU Layer. EXITTING!",2)
             exit()
 
         # ---------------------------------------------------------------------------Dissolve intersection output by the following fields
@@ -803,14 +803,14 @@ if __name__ == '__main__':
         outTabulate = arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
         TabulateArea(helYesNo,cluNumberFld,finalHELmap,"VALUE",outTabulate,cellSize)
         tabulateFields = [fld.name for fld in arcpy.ListFields(outTabulate)][2:]
-        scratchLayers.append((eiFactor,helFactor,outTabulate))
+        scratchLayers.append((eiFactor,helFactor))#,outTabulate))
 
         if len(tabulateFields):
             if not "VALUE_1" in tabulateFields:
-                AddMsgAndPrint("\t WARNING: Entire Area is HEL",1)
+                AddMsgAndPrint("\tWARNING: Entire Area is HEL; No need to proceed.",1)
                 exit()
             if not "VALUE_2" in tabulateFields:
-                AddMsgAndPrint("\t WARNING: Entire Area is NHEL",1)
+                AddMsgAndPrint("\tWARNING: Entire Area is NHEL; No need to proceed.",1)
                 exit()
         else:
             AddMsgAndPrint("\n\tReclassifying Failed",2)
@@ -846,7 +846,7 @@ if __name__ == '__main__':
                 row[1] = helPct
                 clu = row[3]
 
-                if helPct > 33.3333:
+                if helPct > 33.3333 or helAcres > 50.0:
                     row[2] = "Yes"
                 else:
                     row[2] = "No"
@@ -881,7 +881,7 @@ if __name__ == '__main__':
 
         """---------------------------------------------------------------------------------------------- Prepare Symboloby for ArcMap is session exists"""
         try:
-            #AddMsgAndPrint("\n")  # Strictly Formatting
+            AddMsgAndPrint("\n")  # Strictly Formatting
 
             # List of layers to add to Arcmap (layer path, arcmap layer name)
             addToArcMap = [(finalHELmap,"Final HEL Map"),(helSummary,"HEL Summary Layer"),(helYesNo,"HEL YES NO")]
@@ -913,7 +913,7 @@ if __name__ == '__main__':
                 arcpy.mapping.AddLayer(df, result, "TOP")
 
                 """ The following code will update the layer symbology for HEL Summary Layer
-                    to include AOI acres and percentage.  It was decided to exclude this."""
+                    to include AOI acres and percentage. """
                 if layer[1] == "HEL Summary Layer":
                     lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
                     lyr.symbology.classLabels = ogHELsymbologyLabels
@@ -924,20 +924,24 @@ if __name__ == '__main__':
 
                 """ The following code will update the layer symbology for the Final HEL Map
                     Layer to include AOI acres and percentage.  It was decided to exclude this."""
-##                if layer[1] == "Final HEL Map":
-##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-##                    newHELsymbologyLabels = []
-##
-##                    # This assumes that both "VALUE_1 and VALUE_2 are present
-##                    HEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"))])/acreConversion
-##                    NHEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1"))])/acreConversion
-##                    newHELsymbologyLabels.append("HEL  -- " + str(round(HEL,1)) + " .ac -- " + str(round((HEL/(HEL + NHEL))*100,1)) + " %")
-##                    newHELsymbologyLabels.append("NHEL -- " + str(round(NHEL,1)) + " .ac -- " + str(round((NHEL/(HEL + NHEL))*100,1)) + " %")
-##
-##                    lyr.symbology.classBreakLabels = newHELsymbologyLabels
-##                    arcpy.RefreshActiveView()
-##                    arcpy.RefreshTOC()
-##                    del lyr,newHELsymbologyLabels
+                if layer[1] == "Final HEL Map":
+                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+                    newHELsymbologyLabels = []
+
+                    # This assumes that both "VALUE_1 and VALUE_2 are present
+                    HEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"))])/acreConversion
+                    NHEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1"))])/acreConversion
+
+                    if HEL > 0:
+                       newHELsymbologyLabels.append("HEL  -- " + str(round(HEL,1)) + " .ac -- " + str(round((HEL/(HEL + NHEL))*100,1)) + " %")
+
+                    if NHEL > 0:
+                       newHELsymbologyLabels.append("NHEL -- " + str(round(NHEL,1)) + " .ac -- " + str(round((NHEL/(HEL + NHEL))*100,1)) + " %")
+
+                    lyr.symbology.classBreakLabels = newHELsymbologyLabels
+                    arcpy.RefreshActiveView()
+                    arcpy.RefreshTOC()
+                    del lyr,newHELsymbologyLabels
 
                 if layer[1] == "HEL YES NO":
                     lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
@@ -986,7 +990,7 @@ if __name__ == '__main__':
                     arcpy.CalculateField_management(helYesNo,field,expression,"VB")
                 arcpy.SetProgressorPosition()
 
-            AddMsgAndPrint("Opening 026 Form",0)
+            AddMsgAndPrint("\tOpening 026 Form",0)
             subprocess.Popen([msAccessPath,helDatabase])
 
         arcpy.SetProgressorLabel("Removing Temp Layers")
