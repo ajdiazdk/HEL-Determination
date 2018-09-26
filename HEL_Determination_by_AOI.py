@@ -993,9 +993,9 @@ if __name__ == '__main__':
             AddMsgAndPrint("\tOpening 026 Form",0)
             subprocess.Popen([msAccessPath,helDatabase])
 
-        arcpy.SetProgressorLabel("Removing Temp Layers")
-        AddMsgAndPrint("\nRemoving Temp Layers")
-        removeScratchLayers()
+##        arcpy.SetProgressorLabel("Removing Temp Layers")
+##        AddMsgAndPrint("\nRemoving Temp Layers")
+##        removeScratchLayers()
 
     except:
         removeScratchLayers()
