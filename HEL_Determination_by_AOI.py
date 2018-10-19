@@ -11,10 +11,10 @@
 #
 # Author: Christiane Roy
 # e-mail: christian.roy@mn.usda.gov
-# phone: 608.662.4422 ext. 190
+# phone: 507.405.3580
 #
 # Created:     7/04/2016
-# Last Modified: 3/12/2018
+# Last Modified: 10/117/2018
 # Copyright:   (c) Adolfo.Diaz 2016
 
 #-------------------------------------------------------------------------------
@@ -880,6 +880,7 @@ if __name__ == '__main__':
         arcpy.SetProgressorPosition()
 
         """---------------------------------------------------------------------------------------------- Prepare Symboloby for ArcMap is session exists"""
+        # this section was modified by Christiane Roy 10/17/2018 to remove information on labels on map and in TOC.
         try:
             AddMsgAndPrint("\n")  # Strictly Formatting
 
@@ -912,18 +913,27 @@ if __name__ == '__main__':
                 arcpy.ApplySymbologyFromLayer_management(result,symbology)
                 arcpy.mapping.AddLayer(df, result, "TOP")
 
-                """ The following code will update the layer symbology for HEL Summary Layer
-                    to include AOI acres and percentage. """
+                """ The following code will update the layer symbology for HEL Summary Layer"""
+                # to NOT include AOI acres and percentage.
                 if layer[1] == "HEL Summary Layer":
                     lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-                    lyr.symbology.classLabels = ogHELsymbologyLabels
-                    lyr.visible = False
-                    arcpy.RefreshActiveView()
-                    arcpy.RefreshTOC()
+                    # lyr.symbology.classLabels = ogHELsymbologyLabels
+                    # lyr.visible = False
+                    # arcpy.RefreshActiveView()
+                    # arcpy.RefreshTOC()
+                    # del ly
+                    expression = """[HEL] & vbNewLine &  round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_AcrePct] ,1) & "%)" & vbNewLine """
+                    if lyr.supports("LABELCLASSES"):
+                        for lblClass in lyr.labelClasses:
+                            if lblClass.showClassLabels:
+                                lblClass.expression = expression
+                        lyr.showLabels = True
+                        arcpy.RefreshActiveView()
+                        arcpy.RefreshTOC()
                     del lyr
 
-                """ The following code will update the layer symbology for the Final HEL Map
-                    Layer to include AOI acres and percentage.  It was decided to exclude this."""
+                """ The following code will update the layer symbology for the Final HEL Map. """
+                # cannot add acres and percent "by AOI". acres and pecent can only be calculated by CLU field.
                 if layer[1] == "Final HEL Map":
                     lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
                     newHELsymbologyLabels = []
@@ -933,10 +943,10 @@ if __name__ == '__main__':
                     NHEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1"))])/acreConversion
 
                     if HEL > 0:
-                       newHELsymbologyLabels.append("HEL  -- " + str(round(HEL,1)) + " .ac -- " + str(round((HEL/(HEL + NHEL))*100,1)) + " %")
+                       newHELsymbologyLabels.append("HEL")
 
                     if NHEL > 0:
-                       newHELsymbologyLabels.append("NHEL -- " + str(round(NHEL,1)) + " .ac -- " + str(round((NHEL/(HEL + NHEL))*100,1)) + " %")
+                       newHELsymbologyLabels.append("NHEL")
 
                     lyr.symbology.classBreakLabels = newHELsymbologyLabels
                     arcpy.RefreshActiveView()
@@ -946,7 +956,7 @@ if __name__ == '__main__':
                 if layer[1] == "HEL YES NO":
                     lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
                     #expression = """def FindLabel ( [CLUNBR], [HEL_Acres], [HEL_Pct], [HEL_YES] ):  return "CLU #: " + [CLUNBR] + "\nHEL Acres: " + str(round(float([HEL_Acres]),1)) + " (" + str(round(float( [HEL_Pct] ),1)) + "%)\nHEL: " + [HEL_YES]"""
-                    expression = """"TRCT #: " & [TRACTNBR] & vbNewLine & "CLU #: " & [CLUNBR] & vbNewLine & "Acres: " & round([CALCACRES],1) & vbNewLine & "HEL Acres: " & round([HEL_Acres] ,1) & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & "HEL: " & [HEL_YES]"""
+                    expression = """"T: " & [TRACTNBR] & vbNewLine & "#" & [CLUNBR] & vbNewLine & round([CALCACRES],1)& "ac." & vbNewLine & "HEL: " & round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & "HEL: " & [HEL_YES]"""
 
                     if lyr.supports("LABELCLASSES"):
                         for lblClass in lyr.labelClasses:
