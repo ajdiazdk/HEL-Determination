@@ -696,7 +696,8 @@ if __name__ == '__main__':
         else:
             flowLengthFT = flowLength
             arcpy.SetProgressorPosition()
-        scratchLayers.append((cluBuffer,demExtract,slope,flowDirection,flowLength,outflowLengthFT))
+
+        scratchLayers.append((cluBuffer,demExtract,slope,flowDirection,flowLength,flowLengthFT))
 
         """------------------------------------------------------------------------------------------------------------- Calculate LS Factor"""
         # ------------------------------------------------------------------------------- Calculate S Factor
