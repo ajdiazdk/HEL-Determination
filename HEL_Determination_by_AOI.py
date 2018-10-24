@@ -17,6 +17,14 @@
 # Last Modified: 10/117/2018
 # Copyright:   (c) Adolfo.Diaz 2016
 
+# Modified 10/24/2016
+# Line 705; outflowLengthFT was added to the scratchLayers to be deleted.  It should've
+# been flowLengthFT
+#
+# The acreConversion variable was updated to reference a dictionary instead.  The original
+# acreConversion variable was being determined from DEM.  If input DEM was in FT then
+# the wrong conversion was applied to layers that were in Meters.
+
 #-------------------------------------------------------------------------------
 
 ## ===================================================================================
@@ -446,23 +454,23 @@ if __name__ == '__main__':
         """ ---------------------------------------------------------------------------------------------- Check DEM Coordinate System and Linear Units"""
         acreConversionDict = {'Meter':4046.85642,'Foot':43560,'Foot_US':43560}
 
-##        desc = arcpy.Describe(cluLayer)
-##        inputDEMPath = desc.catalogPath
-##        sr = desc.SpatialReference
-##        units = sr.LinearUnitName
-##        cellSize = desc.MeanCellWidth
-##
-##        AddMsgAndPrint("\nGathering information about CLU Layer: " + os.path.basename(inputDEMPath))
-##
-##        if units == "Meter":
-##            units = "Meters"
-##            acreConversion = 4046.85642
-##        elif units == "Foot" or units == "Foot_US":
-##            units = "Feet"
-##            acreConversion = 43560
-##        else:
-##            AddMsgAndPrint("\tCould not determine linear units of DEM....Exiting!",2)
-##            exit()
+        desc = arcpy.Describe(cluLayer)
+        inputDEMPath = desc.catalogPath
+        sr = desc.SpatialReference
+        units = sr.LinearUnitName
+        cellSize = desc.MeanCellWidth
+
+        AddMsgAndPrint("\nGathering information about DEM Layer: " + os.path.basename(inputDEMPath))
+
+        if units == "Meter":
+            units = "Meters"
+            acreConversion = 4046.85642
+        elif units == "Foot" or units == "Foot_US":
+            units = "Feet"
+            acreConversion = 43560
+        else:
+            AddMsgAndPrint("\tCould not determine linear units of DEM....Exiting!",2)
+            exit()
 
         # if zUnits were left blank than assume Z-values are the same as XY units.
         if not zUnits:
