@@ -444,23 +444,25 @@ if __name__ == '__main__':
         AddMsgAndPrint("\tTotal Acres: " + splitThousands(totalAcres))
 
         """ ---------------------------------------------------------------------------------------------- Check DEM Coordinate System and Linear Units"""
-        desc = arcpy.Describe(inputDEM)
-        inputDEMPath = desc.catalogPath
-        sr = desc.SpatialReference
-        units = sr.LinearUnitName
-        cellSize = desc.MeanCellWidth
+        acreConversionDict = {'Meter':4046.85642,'Foot':43560,'Foot_US':43560}
 
-        AddMsgAndPrint("\nGathering information about DEM: " + os.path.basename(inputDEMPath))
-
-        if units == "Meter":
-            units = "Meters"
-            acreConversion = 4046.85642
-        elif units == "Foot" or units == "Foot_US":
-            units = "Feet"
-            acreConversion = 43560
-        else:
-            AddMsgAndPrint("\tCould not determine linear units of DEM....Exiting!",2)
-            exit()
+##        desc = arcpy.Describe(cluLayer)
+##        inputDEMPath = desc.catalogPath
+##        sr = desc.SpatialReference
+##        units = sr.LinearUnitName
+##        cellSize = desc.MeanCellWidth
+##
+##        AddMsgAndPrint("\nGathering information about CLU Layer: " + os.path.basename(inputDEMPath))
+##
+##        if units == "Meter":
+##            units = "Meters"
+##            acreConversion = 4046.85642
+##        elif units == "Foot" or units == "Foot_US":
+##            units = "Feet"
+##            acreConversion = 43560
+##        else:
+##            AddMsgAndPrint("\tCould not determine linear units of DEM....Exiting!",2)
+##            exit()
 
         # if zUnits were left blank than assume Z-values are the same as XY units.
         if not zUnits:
@@ -511,7 +513,7 @@ if __name__ == '__main__':
         arcpy.Intersect_analysis([helYesNo,helLayer],aoiCluIntersect,"ALL")
 
         # Test intersection
-        totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(aoiCluIntersect, ("SHAPE@AREA"))]) / acreConversion
+        totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(aoiCluIntersect, ("SHAPE@AREA"))]) / acreConversionDict.get(arcpy.Describe(aoiCluIntersect).SpatialReference.LinearUnitName)
         if not totalIntAcres:
             AddMsgAndPrint("\tThere is no overlap between AOI and CLU Layer. EXITTING!",2)
             exit()
@@ -552,7 +554,7 @@ if __name__ == '__main__':
         with arcpy.da.UpdateCursor(helSummary,[helFld,HELvalueFld,HELacres,"SHAPE@AREA",HELacrePct,calcAcreFld]) as cursor:
             for row in cursor:
 
-                acres = row[3] / acreConversion
+                acres = row[3] / acreConversionDict.get(arcpy.Describe(helSummary).SpatialReference.LinearUnitName)
                 row[2] = acres
                 maxAcreLength.append(acres)
                 row[4] = round((row[2] / row[5]) * 100,1) # HEL acre percentage
@@ -835,6 +837,7 @@ if __name__ == '__main__':
 
                 expression = arcpy.AddFieldDelimiters(outTabulate,cluNumberFld) + " = " + str(row[3])
                 outTabulateValues = ([(rows[0],rows[1]) for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1","VALUE_2"), where_clause = expression)])[0]
+                acreConversion = acreConversionDict.get(arcpy.Describe(helYesNo).SpatialReference.LinearUnitName)
 
                 helAcres = float(outTabulateValues[1]) / acreConversion
                 helPct = (helAcres / row[4]) * 100
@@ -938,6 +941,7 @@ if __name__ == '__main__':
                 if layer[1] == "Final HEL Map":
                     lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
                     newHELsymbologyLabels = []
+                    acreConversion = acreConversionDict.get(arcpy.Describe(helYesNo).SpatialReference.LinearUnitName)
 
                     # This assumes that both "VALUE_1 and VALUE_2 are present
                     HEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"))])/acreConversion
