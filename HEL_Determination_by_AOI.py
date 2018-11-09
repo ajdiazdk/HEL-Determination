@@ -22,8 +22,15 @@
 # been flowLengthFT
 #
 # The acreConversion variable was updated to reference a dictionary instead.  The original
-# acreConversion variable was being determined from DEM.  If input DEM was in FT then
-# the wrong conversion was applied to layers that were in Meters.
+# acreConversion variable was being determined from the DEM.  If input DEM was in FT then
+# the wrong acre conversion was applied to layers that were in Meters.
+
+# Modified 11/19/2018
+# Tim Prescott was having acre disrepancies.  He had a wide variety of coordinate systems
+# in his arcmap project.  I couldn't isolate the problem but I wound up changine
+# the way the z-factor is assigned.  I was assuming a meter and/or feet combination but
+# there could be other combinations like centimeters. Created a matrix of XY and Z
+# unit combinations to be used as a look up table.
 
 #-------------------------------------------------------------------------------
 
@@ -451,61 +458,53 @@ if __name__ == '__main__':
         totalAcres = float("%.1f" % (sum([row[0] for row in arcpy.da.SearchCursor(helYesNo, (calcAcreFld))])))
         AddMsgAndPrint("\tTotal Acres: " + splitThousands(totalAcres))
 
-        """ ---------------------------------------------------------------------------------------------- Check DEM Coordinate System and Linear Units"""
-        acreConversionDict = {'Meter':4046.85642,'Foot':43560,'Foot_US':43560}
+        """ ---------------------------------------------------------------------------------------------- Check DEM Coordinate System, Linear Units, Z-factor"""
+        acreConversionDict = {'Meter':4046.85642,'Foot':43560,'Foot_US':43560,'Centimeter':40470000,'Inch':6273000}
 
-        desc = arcpy.Describe(cluLayer)
+        desc = arcpy.Describe(inputDEM)
         inputDEMPath = desc.catalogPath
         sr = desc.SpatialReference
-        units = sr.LinearUnitName
+        linearUnits = sr.LinearUnitName
         cellSize = desc.MeanCellWidth
 
-        AddMsgAndPrint("\nGathering information about DEM Layer: " + os.path.basename(inputDEMPath))
-
-        if units == "Meter":
-            units = "Meters"
-            acreConversion = 4046.85642
-        elif units == "Foot" or units == "Foot_US":
-            units = "Feet"
-            acreConversion = 43560
+        # Coordinate System must be a Projected type
+        if not sr.Type == "Projected":
+            AddMsgAndPrint("\n\n\t" + os.path.basename(inputDEMPath) + " is NOT in a projected Coordinate System....EXITING",2)
+            exit()
         else:
+            AddMsgAndPrint("\nGathering information about DEM Layer: " + os.path.basename(inputDEMPath))
+
+        # xy Linear units must be defined
+        if not linearUnits:
             AddMsgAndPrint("\tCould not determine linear units of DEM....Exiting!",2)
             exit()
 
-        # if zUnits were left blank than assume Z-values are the same as XY units.
-        if not zUnits:
-            zUnits = units
+        # Assign Z-factor based on XY and Z units of DEM
+        # the following represents a matrix of possible z-Factors
+        # using different combination of xy and z units
+        # ----------------------------------------------------
+        #                      Z - Units
+        #                       Meter    Foot     Centimeter     Inch
+        #          Meter         1	    0.3048	    0.01	    0.0254
+        #  XY      Foot        3.28084	  1	      0.0328084	    0.083333
+        # Units    Centimeter   100	    30.48	     1	         2.54
+        #          Inch        39.3701	  12       0.393701	      1
+        # ---------------------------------------------------
 
-        # Coordinate System must be a Projected type in order to continue.
-        # zUnits will determine Zfactor
-        # if XY units differ from Z units then a Zfactor must be calculated to adjust
-        # the z units by multiplying by the Zfactor
+        unitLookUpDict = {'Meter':0,'Meters':0,'Foot':1,'Foot_US':1,'Feet':1,'Centimeter':2,'Centimeters':2,'Inch':3,'Inches':3}
+        zFactorList = [[1,0.3048,0.01,0.0254],
+                       [3.28084,1,0.0328084,0.083333],
+                       [100,30.48,1,2.54],
+                       [39.3701,12,0.393701,1]]
 
-        if sr.Type == "Projected":
-            if not zUnits == units:
+        # look up zFactor based on units (z,xy -- I should've reversed the table)
+        zFactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(linearUnits)]
 
-                if zUnits == "Meters":
-                    Zfactor = 3.280839896       # 3.28 feet in a meter
-
-                elif zUnits == "Centimeters":   # 0.033 feet in a centimeter
-                    Zfactor = 0.0328084
-
-                elif zUnits == "Inches":        # 0.083 feet in an inch
-                    Zfactor = 0.0833333
-
-            # z units and XY units are the same thus no conversion is required (Feet is assumed here)
-            else:
-                Zfactor = 1.0
-
-            AddMsgAndPrint("\tProjection Name: " + sr.Name,0)
-            AddMsgAndPrint("\tXY Linear Units: " + units,0)
-            AddMsgAndPrint("\tElevation Values (Z): " + zUnits,0)
-            AddMsgAndPrint("\tCell Size: " + str(desc.MeanCellWidth) + " x " + str(desc.MeanCellHeight) + " " + units,0)
-            AddMsgAndPrint("\tZ-Factor: " + str(Zfactor) )
-
-        else:
-            AddMsgAndPrint("\n\n\t" + os.path.basename(inputDEMPath) + " is NOT in a projected Coordinate System....EXITING",2)
-            exit()
+        AddMsgAndPrint("\tProjection Name: " + sr.Name,0)
+        AddMsgAndPrint("\tXY Linear Units: " + linearUnits,0)
+        AddMsgAndPrint("\tElevation Values (Z): " + zUnits,0)
+        AddMsgAndPrint("\tCell Size: " + str(desc.MeanCellWidth) + " x " + str(desc.MeanCellHeight) + " " + linearUnits,0)
+        AddMsgAndPrint("\tZ-Factor: " + str(zFactor))
 
         arcpy.SetProgressor("step", "Calculating HEL Determination", 0, 17, 1)
 
@@ -677,7 +676,7 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Creating Slope Derivative")
         AddMsgAndPrint("\tCreating Slope Derivative")
         slope = arcpy.CreateScratchName("slope",data_type="RasterDataset",workspace=scratchWS)
-        outSlope = Slope(demExtract,"PERCENT_RISE",Zfactor)
+        outSlope = Slope(demExtract,"PERCENT_RISE",zFactor)
         outSlope.save(slope)
         arcpy.SetProgressorPosition()
 
@@ -696,7 +695,7 @@ if __name__ == '__main__':
         outFlowLength.save(flowLength)
 
         # convert Flow Length distance units to feet if original DEM is not in feet.
-        if not zUnits == ("Feet"):
+        if not zUnits in ('Feet','Foot','Foot_US'):
             AddMsgAndPrint("\t\tConverting Flow Length Distance units to Feet")
             flowLengthFT = arcpy.CreateScratchName("flowLength_FT",data_type="RasterDataset",workspace=scratchWS)
             outflowLengthFT = Raster(flowLength) * 3.280839896
