@@ -32,6 +32,11 @@
 # there could be other combinations like centimeters. Created a matrix of XY and Z
 # unit combinations to be used as a look up table.
 
+# Modified 11/15/2018
+# Christiane reported duplicate labeling in the HEL Summary feature class.  The duplicate
+# labels go away when the corresponding .lyr file is added instead of the feature class.
+# Modified the code to add the .lyr to Arcmap only for the HEL Summary layer.
+
 #-------------------------------------------------------------------------------
 
 ## ===================================================================================
@@ -910,6 +915,7 @@ if __name__ == '__main__':
 
             for layer in addToArcMap:
 
+                # remove layer from ArcMap if it exists
                 if layer[1] in currentLayersStr:
                     arcpy.mapping.RemoveLayer(df,currentLayersObj[currentLayersStr.index(layer[1])])
 
@@ -922,26 +928,39 @@ if __name__ == '__main__':
                 symbology = os.path.join(os.path.dirname(sys.argv[0]),layer[1].lower().replace(" ","") + ".lyr")
 
                 arcpy.ApplySymbologyFromLayer_management(result,symbology)
-                arcpy.mapping.AddLayer(df, result, "TOP")
+
+                # The HEL Summary Layer that was being added to ArcMap had duplicate
+                # labels in spite of being multi-part.  By adding the .lyr file
+                # to ArcMap instead of the feature class (don't understand why)
+                if layer[1] == "HEL Summary Layer":
+                     helSummaryLYR = arcpy.mapping.Layer(symbology)
+                     arcpy.mapping.AddLayer(df, helSummaryLYR, "TOP")
+
+                     # Turn the .lyr on; it is off by default
+                     for lyr in arcpy.mapping.ListLayers(mxd, layer[1]):
+                         lyr.visible = True
+
+                else:
+                     arcpy.mapping.AddLayer(df, result, "TOP")
 
                 """ The following code will update the layer symbology for HEL Summary Layer"""
-                # to NOT include AOI acres and percentage.
-                if layer[1] == "HEL Summary Layer":
-                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-                    # lyr.symbology.classLabels = ogHELsymbologyLabels
-                    # lyr.visible = False
-                    # arcpy.RefreshActiveView()
-                    # arcpy.RefreshTOC()
-                    # del ly
-                    expression = """[HEL] & vbNewLine &  round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_AcrePct] ,1) & "%)" & vbNewLine """
-                    if lyr.supports("LABELCLASSES"):
-                        for lblClass in lyr.labelClasses:
-                            if lblClass.showClassLabels:
-                                lblClass.expression = expression
-                        lyr.showLabels = True
-                        arcpy.RefreshActiveView()
-                        arcpy.RefreshTOC()
-                    del lyr
+##                # to NOT include AOI acres and percentage.
+##                if layer[1] == "HEL Summary Layer":
+##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+##                    # lyr.symbology.classLabels = ogHELsymbologyLabels
+##                    # lyr.visible = False
+##                    # arcpy.RefreshActiveView()
+##                    # arcpy.RefreshTOC()
+##                    # del ly
+##                    expression = """[HEL] & vbNewLine &  round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_AcrePct] ,1) & "%)" & vbNewLine """
+##                    if lyr.supports("LABELCLASSES"):
+##                        for lblClass in lyr.labelClasses:
+##                            if lblClass.showClassLabels:
+##                                lblClass.expression = expression
+##                        lyr.showLabels = True
+##                        arcpy.RefreshActiveView()
+##                        arcpy.RefreshTOC()
+##                    del lyr
 
                 """ The following code will update the layer symbology for the Final HEL Map. """
                 # cannot add acres and percent "by AOI". acres and pecent can only be calculated by CLU field.
@@ -981,6 +1000,7 @@ if __name__ == '__main__':
                 AddMsgAndPrint("Added " + layer[1] + " to your ArcMap Session",0)
 
         except:
+            errorMsg()
             pass
 
         """---------------------------------------------------------------------------------------------- Prepare 026 Form"""
@@ -998,7 +1018,7 @@ if __name__ == '__main__':
             arcpy.SetProgressor("step", "Preparing and Populating 026 Form", 0, len(fieldDict), 1)
 
             for field,params in fieldDict.iteritems():
-                arcpy.SetProgressorLabel("Adding Field: " + field)
+                arcpy.SetProgressorLabel("Adding Field: " + field + r' to "HEL YES NO" layer')
                 try:
                     fldLength = params[2]
                 except:
