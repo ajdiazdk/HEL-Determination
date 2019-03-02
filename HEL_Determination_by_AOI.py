@@ -2,20 +2,20 @@
 # Name:        HEL Determination by AOI
 #
 # Author: Adolfo.Diaz
+#         Region 10 GIS Specialist
 # e-mail: adolfo.diaz@wi.usda.gov
 # phone: 608.662.4422 ext. 216
-#
+
 # Author: Kevin Godsey
+#         Soil Scientist
 # e-mail: kevin.godsey@mo.usda.gov
 # phone: 608.662.4422 ext. 190
-#
+
 # Author: Christiane Roy
+#         MN Area GIS Specialist
 # e-mail: christian.roy@mn.usda.gov
 # phone: 507.405.3580
 #
-# Created:     7/04/2016
-# Last Modified: 10/117/2018
-# Copyright:   (c) Adolfo.Diaz 2016
 
 # Modified 10/24/2016
 # Line 705; outflowLengthFT was added to the scratchLayers to be deleted.  It should've
@@ -25,6 +25,7 @@
 # acreConversion variable was being determined from the DEM.  If input DEM was in FT then
 # the wrong acre conversion was applied to layers that were in Meters.
 
+#====================
 # Modified 11/19/2018
 # Tim Prescott was having acre disrepancies.  He had a wide variety of coordinate systems
 # in his arcmap project.  I couldn't isolate the problem but I wound up changine
@@ -32,10 +33,33 @@
 # there could be other combinations like centimeters. Created a matrix of XY and Z
 # unit combinations to be used as a look up table.
 
+#====================
+# Modified 11/19/2018
+# Tim Prescott was having acre disrepancies.  He had a wide variety of coordinate systems
+# in his arcmap project.  I couldn't isolate the problem but I wound up changine
+# the way the z-factor is assigned.  I was assuming a meter and/or feet combination but
+# there could be other combinations like centimeters. Created a matrix of XY and Z
+# unit combinations to be used as a look up table.
+
+#====================
 # Modified 11/15/2018
 # Christiane reported duplicate labeling in the HEL Summary feature class.  The duplicate
 # labels go away when the corresponding .lyr file is added instead of the feature class.
 # Modified the code to add the .lyr to Arcmap only for the HEL Summary layer.
+
+#====================
+# Modified 3/1/2019
+# Error Encountered:
+#     Related to optional parameter of zUnits
+#	  File "C:\python_scripts\GitHub\HEL\HEL_Determination_by_AOI.py", line 517, in <module>
+#     zFactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(linearUnits)]
+#	  TypeError: list indices must be integers, not NoneType
+#
+# - Add Focal Statistics to Flow Length output to smooth it out
+# - switched method to exit python interpreter from exit() to sys.exit() and SystemExit Exception
+#   to catch errors.
+# - Switched some output layers to in-memory layer to optimize performance
+
 
 #-------------------------------------------------------------------------------
 
@@ -322,8 +346,8 @@ def removeScratchLayers():
 
 ## =============================================== Main Body ====================================================
 
-import sys, string, os, locale, traceback, urllib, re, arcpy, operator, getpass
-import subprocess
+import sys, string, os, locale, traceback, urllib, re, arcpy, datetime
+import subprocess, operator, getpass, time
 from arcpy import env
 from arcpy.sa import *
 
@@ -358,7 +382,7 @@ if __name__ == '__main__':
         helDatabase = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.mdb'
         if not arcpy.Exists(helDatabase):
             AddMsgAndPrint("\nHEL Access Database does not exist in the same path as HEL Tools",2)
-            exit()
+            sys.exit()
 
         # ----------------------------------------- Set the path to the final HEL_YES_NO layer.  Essentially derived from user AOI
         helYesNo = os.path.join(helDatabase, r'HEL_YES_NO')
@@ -387,7 +411,7 @@ if __name__ == '__main__':
                 finalHELmap = arcpy.CreateScratchName("finalhelmap", data_type="RasterDataset", workspace=helDatabase)
 
         # --------------------------------------------------------- determine Microsoft Access path from windows version
-        isAccess = True
+        bAccess = True
         winVersion = sys.getwindowsversion()
 
         # Windows 10
@@ -398,10 +422,10 @@ if __name__ == '__main__':
             msAccessPath = r'C:\Program Files (x86)\Microsoft Office\Office15\MSACCESS.EXE'
         else:
             AddMsgAndPrint("\nCould not determine Windows version, will not populate 026 Form",2)
-            isAccess = False
+            bAccess = False
 
-        if isAccess and not os.path.isfile(msAccessPath):
-            isAccess = False
+        if bAccess and not os.path.isfile(msAccessPath):
+            bAccess = False
             AddMsgAndPrint("\nCould not locate Microsoft Access Software, will not populate 026 Form",2)
 
         arcpy.env.overwriteOutput = True
@@ -412,14 +436,15 @@ if __name__ == '__main__':
             if arcpy.CheckExtension("Spatial") == "Available":
                 arcpy.CheckOutExtension("Spatial")
             else:
-                AddMsgAndPrint("\n\nSpatial Analyst license is unavailable.  May need to turn it on!",2)
+                raise LicenseError
 
         except LicenseError:
-            AddMsgAndPrint("\n\nSpatial Analyst license is unavailable.  May need to turn it on!",2)
-            exit()
+            AddMsgAndPrint("\n\nSpatial Analyst license is unavailable.  Go to Customize -> Extensions to activate it",2)
+            AddMsgAndPrint("\n\nExiting!")
+            sys.exit()
         except arcpy.ExecuteError:
             AddMsgAndPrint(arcpy.GetMessages(2),2)
-            exit()
+            sys.exit()
 
         # Set overwrite option
         arcpy.env.overwriteOutput = True
@@ -430,7 +455,8 @@ if __name__ == '__main__':
         scratchLayers = list()
 
         if not scratchWS:
-            exit()
+            AddMsgAndPrint("\tExiting!")
+            sys.exit()
 
         """ ------------------------------------------------------------------------------------- Prepare CLU Layer; Determine where AOI is coming from"""
         descAOI = arcpy.Describe(AOI)
@@ -464,6 +490,7 @@ if __name__ == '__main__':
         AddMsgAndPrint("\tTotal Acres: " + splitThousands(totalAcres))
 
         """ ---------------------------------------------------------------------------------------------- Check DEM Coordinate System, Linear Units, Z-factor"""
+        # lookup dictionary to convert XY units to area.  Key = XY unit of DEM; Value = conversion factor to sq.meters
         acreConversionDict = {'Meter':4046.85642,'Foot':43560,'Foot_US':43560,'Centimeter':40470000,'Inch':6273000}
 
         desc = arcpy.Describe(inputDEM)
@@ -475,14 +502,14 @@ if __name__ == '__main__':
         # Coordinate System must be a Projected type
         if not sr.Type == "Projected":
             AddMsgAndPrint("\n\n\t" + os.path.basename(inputDEMPath) + " is NOT in a projected Coordinate System....EXITING",2)
-            exit()
+            sys.exit()
         else:
             AddMsgAndPrint("\nGathering information about DEM Layer: " + os.path.basename(inputDEMPath))
 
         # xy Linear units must be defined
         if not linearUnits:
             AddMsgAndPrint("\tCould not determine linear units of DEM....Exiting!",2)
-            exit()
+            sys.exit()
 
         # Assign Z-factor based on XY and Z units of DEM
         # the following represents a matrix of possible z-Factors
@@ -502,12 +529,17 @@ if __name__ == '__main__':
                        [100,30.48,1,2.54],
                        [39.3701,12,0.393701,1]]
 
+        # if zUnits not populated assume it is the same as linearUnits
+        bZunits = True
+        if not zUnits: zUnits = linearUnits; bZunits = False
+
         # look up zFactor based on units (z,xy -- I should've reversed the table)
         zFactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(linearUnits)]
 
         AddMsgAndPrint("\tProjection Name: " + sr.Name,0)
         AddMsgAndPrint("\tXY Linear Units: " + linearUnits,0)
         AddMsgAndPrint("\tElevation Values (Z): " + zUnits,0)
+        if not bZunits: AddMsgAndPrint("\t\tZ-units were auto set to: " + linearUnits,0)
         AddMsgAndPrint("\tCell Size: " + str(desc.MeanCellWidth) + " x " + str(desc.MeanCellHeight) + " " + linearUnits,0)
         AddMsgAndPrint("\tZ-Factor: " + str(zFactor))
 
@@ -521,23 +553,22 @@ if __name__ == '__main__':
         # -------------------------------------------------------------------------- Intersect CLU with soils
         arcpy.SetProgressorLabel("Computing summary of original HEL Values")
         AddMsgAndPrint("\nComputing summary of original HEL Values")
-        aoiCluIntersect = arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS)
+        aoiCluIntersect = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS))
         arcpy.Intersect_analysis([helYesNo,helLayer],aoiCluIntersect,"ALL")
 
         # Test intersection
         totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(aoiCluIntersect, ("SHAPE@AREA"))]) / acreConversionDict.get(arcpy.Describe(aoiCluIntersect).SpatialReference.LinearUnitName)
         if not totalIntAcres:
             AddMsgAndPrint("\tThere is no overlap between AOI and CLU Layer. EXITTING!",2)
-            exit()
+            sys.exit()
 
         # ---------------------------------------------------------------------------Dissolve intersection output by the following fields
         cluNumberFld = "CLUNBR"
         dissovleFlds = ["CLUNBR","TRACTNBR","FARMNBR","COUNTYCD","CALCACRES"]
         for fld in dissovleFlds:
             if not FindField(helYesNo,fld):
-                AddMsgAndPrint("\n\tMissing CLU Layer field: " + fld,2)
-                AddMsgAndPrint("\n\tExiting!")
-                exit()
+                AddMsgAndPrint("\n\tMissing CLU Layer field: " + fld + " ---- Exiting!",2)
+                sys.exit()
 
         dissovleFlds.append(helFld)
         arcpy.Dissolve_management(aoiCluIntersect, helSummary, dissovleFlds, "","MULTI_PART", "DISSOLVE_LINES")
@@ -556,12 +587,11 @@ if __name__ == '__main__':
         if not len(arcpy.ListFields(helSummary,HELacrePct)) > 0:
             arcpy.AddField_management(helSummary,HELacrePct,"DOUBLE")
 
-        # What to do if value is neither?
         # Calculate HELValue Field
-        helDict = dict()
-        nullHEL = 0
-        wrongHELvalues = list()
-        maxAcreLength = list()
+        helDict = dict()          ## tallies acres by HEL value i.e. PHEL:100
+        nullHEL = 0               ## # of polygons with no HEL values
+        wrongHELvalues = list()   ## Stores incorrect HEL Values
+        maxAcreLength = list()    ## Stores the acres for formatting purposes
 
         with arcpy.da.UpdateCursor(helSummary,[helFld,HELvalueFld,HELacres,"SHAPE@AREA",HELacrePct,calcAcreFld]) as cursor:
             for row in cursor:
@@ -574,6 +604,8 @@ if __name__ == '__main__':
                 if row[0] is None or row[0] == '':
                     nullHEL+=1
                     continue
+
+                # Used for rasterization purposes
                 elif row[0] == "PHEL":
                     row[1] = 0
                 elif row[0] == "HEL":
@@ -595,7 +627,8 @@ if __name__ == '__main__':
 
         # Exit if no PHEL values were found
         if not helDict.has_key('PHEL'):
-            AddMsgAndPrint("\n\tWARNING: There are no PHEL values in HEL layer",1)
+            AddMsgAndPrint("\n\tWARNING: There are no PHEL values in HEL layer -- Exiting!",1)
+            sys.exit()
 
         # Inform user about NULL values
         if nullHEL:
@@ -611,8 +644,8 @@ if __name__ == '__main__':
 
         # --------------------------------------------------------------------------------------------------------- Report HEl Layer Summary by CLU
         # Create 2 temporary tables to capture summary statistics
-        ogHelSummaryStats = arcpy.CreateScratchName("ogHELSummaryStats",data_type="ArcInfoTable",workspace=scratchWS)
-        ogHelSummaryStatsPivot = arcpy.CreateScratchName("ogHELSummaryStatsPivot",data_type="ArcInfoTable",workspace=scratchWS)
+        ogHelSummaryStats = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("ogHELSummaryStats",data_type="ArcInfoTable",workspace=scratchWS))
+        ogHelSummaryStatsPivot = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("ogHELSummaryStatsPivot",data_type="ArcInfoTable",workspace=scratchWS))
 
         stats = [[HELacres,"SUM"]]
         caseField = [cluNumberFld,helFld]
@@ -665,7 +698,7 @@ if __name__ == '__main__':
 
         """ ------------------------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
         arcpy.SetProgressorLabel("Buffering AOI by 300 Meters")
-        cluBuffer = arcpy.CreateScratchName("cluBuffer",data_type="FeatureClass",workspace=scratchWS)
+        cluBuffer = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("cluBuffer",data_type="FeatureClass",workspace=scratchWS))
         arcpy.Buffer_analysis(helYesNo,cluBuffer,"300 Meters","FULL","ROUND")
         arcpy.SetProgressorPosition()
 
@@ -695,13 +728,20 @@ if __name__ == '__main__':
 
         arcpy.SetProgressorLabel("Calculating Flow Length")
         AddMsgAndPrint("\tCalculating Flow Length")
-        flowLength = arcpy.CreateScratchName("flowLength",data_type="RasterDataset",workspace=scratchWS)
-        outFlowLength = FlowLength(flowDirection,"UPSTREAM", "")
-        outFlowLength.save(flowLength)
+        preflowLength = arcpy.CreateScratchName("flowLength",data_type="RasterDataset",workspace=scratchWS)
+        outpreFlowLength = FlowLength(flowDirection,"UPSTREAM", "")
+        outpreFlowLength.save(preflowLength)
+
+        # Run a focal statistics on flow length
+        arcpy.SetProgressorLabel("Running Focal Statistics on Flow Length")
+        AddMsgAndPrint("\tRunning Focal Statistics on Flow Length")
+        flowLength = arcpy.CreateScratchName("focStatsMax_FlowLength",data_type="RasterDataset",workspace=scratchWS)
+        outFocalStatistics = FocalStatistics(preflowLength, NbrRectangle(3,3,"CELL"),"MAXIMUM","DATA")
+        outFocalStatistics.save(flowLength)
 
         # convert Flow Length distance units to feet if original DEM is not in feet.
         if not zUnits in ('Feet','Foot','Foot_US'):
-            AddMsgAndPrint("\t\tConverting Flow Length Distance units to Feet")
+            AddMsgAndPrint("\tConverting Flow Length Distance units to Feet")
             flowLengthFT = arcpy.CreateScratchName("flowLength_FT",data_type="RasterDataset",workspace=scratchWS)
             outflowLengthFT = Raster(flowLength) * 3.280839896
             outflowLengthFT.save(flowLengthFT)
@@ -717,7 +757,7 @@ if __name__ == '__main__':
         # ------------------------------------------------------------------------------- Calculate S Factor
         # ((0.065 +( 0.0456 * ("%slope%"))) +( 0.006541 * (Power("%slope%",2))))
         arcpy.SetProgressorLabel("Calculating S Factor")
-        AddMsgAndPrint("\tCalculating S Factor")
+        AddMsgAndPrint("\n\tCalculating S Factor")
         sFactor = arcpy.CreateScratchName("sFactor",data_type="RasterDataset",workspace=scratchWS)
         outsFactor = (Power(Raster(slope),2) * 0.006541) + ((Raster(slope) * 0.0456) + 0.065)
         outsFactor.save(sFactor)
@@ -754,10 +794,12 @@ if __name__ == '__main__':
 
         """------------------------------------------------------------------------------------------------------------- Convert K,T & R Factor and HEL Value to Rasters """
         AddMsgAndPrint("\nConverting Vector to Raster for Spatial Analysis Purpose")
-        kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
-        tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
-        rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
-        helValue = arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS)
+
+        # All raster datasets will be created in memory
+        kFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS))
+        tFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS))
+        rFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS))
+        helValue = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS))
 
         arcpy.SetProgressorLabel("Converting K Factor field to a raster")
         AddMsgAndPrint("\tConverting K Factor field to a raster")
@@ -815,21 +857,21 @@ if __name__ == '__main__':
         AddMsgAndPrint("\nComputing summary of new HEL Values:\n")
 
         # Summarize the total area by CLU
-        outTabulate = arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
+        outTabulate = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("HEL_Tabulate",data_type="ArcInfoTable",workspace=scratchWS))
         TabulateArea(helYesNo,cluNumberFld,finalHELmap,"VALUE",outTabulate,cellSize)
         tabulateFields = [fld.name for fld in arcpy.ListFields(outTabulate)][2:]
         scratchLayers.append((eiFactor,helFactor,outTabulate))
 
         if len(tabulateFields):
             if not "VALUE_1" in tabulateFields:
-                AddMsgAndPrint("\tWARNING: Entire Area is HEL; No need to proceed.",1)
-                exit()
+                AddMsgAndPrint("\tWARNING: Entire Area is HEL; No need to proceed. Halting Process",1)
+                sys.exit()
             if not "VALUE_2" in tabulateFields:
-                AddMsgAndPrint("\tWARNING: Entire Area is NHEL; No need to proceed.",1)
-                exit()
+                AddMsgAndPrint("\tWARNING: Entire Area is NHEL; No need to proceed. Halting Process",1)
+                sys.exit()
         else:
             AddMsgAndPrint("\n\tReclassifying Failed",2)
-            exit()
+            sys.exit()
 
         fieldList = [HELacres,"HEL_Pct","HEL_YES"]
         for field in fieldList:
@@ -1005,14 +1047,16 @@ if __name__ == '__main__':
 
         """---------------------------------------------------------------------------------------------- Prepare 026 Form"""
         # Add 18 Fields to the helYesNo feature class
-        if isAccess:
+        if bAccess:
 
+            today = datetime.date.today()
+            today = today.strftime('%b %d, %Y')
             fieldDict = {"Signature":("TEXT",dcSignature,50),"SoilAvailable":("TEXT","Yes",5),"Completion":("TEXT","Office",10),
                             "SodbustField":("TEXT","No",5),"Delivery":("TEXT","Mail",10),"Remarks":("TEXT",
                             "This preliminary determination was conducted off-site with LiDAR data only if PHEL mapunits are present.",110),
                             "RequestDate":("DATE",""),"LastName":("TEXT","",50),"FirstName":("TEXT","",25),"Address":("TEXT","",50),
                             "City":("TEXT","",25),"ZipCode":("TEXT","",10),"Request_from":("TEXT","Landowner",15),"HELFarm":("TEXT","Yes",5),
-                            "Determination_Date":("DATE","Now (  )"),"state":("TEXT",state,2),"SodbustTract":("TEXT","No",5),"Lidar":("TEXT","Yes",5)}
+                            "Determination_Date":("DATE",today),"state":("TEXT",state,2),"SodbustTract":("TEXT","No",5),"Lidar":("TEXT","Yes",5)}
 
             AddMsgAndPrint("\nPreparing and Populating 026 Form", 0)
             arcpy.SetProgressor("step", "Preparing and Populating 026 Form", 0, len(fieldDict), 1)
@@ -1035,10 +1079,13 @@ if __name__ == '__main__':
             AddMsgAndPrint("\tOpening 026 Form",0)
             subprocess.Popen([msAccessPath,helDatabase])
 
-##        arcpy.SetProgressorLabel("Removing Temp Layers")
-##        AddMsgAndPrint("\nRemoving Temp Layers")
-##        removeScratchLayers()
+        arcpy.SetProgressorLabel("Removing Temp Layers")
+        AddMsgAndPrint("\nRemoving Temp Layers")
+        removeScratchLayers()
 
+    except SystemExit():
+        removeScratchLayers()
+        pass
     except:
         removeScratchLayers()
         errorMsg()
