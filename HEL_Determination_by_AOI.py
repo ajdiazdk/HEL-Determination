@@ -1,4 +1,4 @@
-#-------------------------------------------------------------------------------
+# ==========================================================================================
 # Name:        HEL Determination by AOI
 #
 # Author: Adolfo.Diaz
@@ -17,6 +17,7 @@
 # phone: 507.405.3580
 #
 
+# ==========================================================================================
 # Modified 10/24/2016
 # Line 705; outflowLengthFT was added to the scratchLayers to be deleted.  It should've
 # been flowLengthFT
@@ -25,7 +26,7 @@
 # acreConversion variable was being determined from the DEM.  If input DEM was in FT then
 # the wrong acre conversion was applied to layers that were in Meters.
 
-#====================
+# ==========================================================================================
 # Modified 11/19/2018
 # Tim Prescott was having acre disrepancies.  He had a wide variety of coordinate systems
 # in his arcmap project.  I couldn't isolate the problem but I wound up changine
@@ -33,7 +34,7 @@
 # there could be other combinations like centimeters. Created a matrix of XY and Z
 # unit combinations to be used as a look up table.
 
-#====================
+# ==========================================================================================
 # Modified 11/19/2018
 # Tim Prescott was having acre disrepancies.  He had a wide variety of coordinate systems
 # in his arcmap project.  I couldn't isolate the problem but I wound up changine
@@ -41,25 +42,32 @@
 # there could be other combinations like centimeters. Created a matrix of XY and Z
 # unit combinations to be used as a look up table.
 
-#====================
+# ==========================================================================================
 # Modified 11/15/2018
 # Christiane reported duplicate labeling in the HEL Summary feature class.  The duplicate
 # labels go away when the corresponding .lyr file is added instead of the feature class.
 # Modified the code to add the .lyr to Arcmap only for the HEL Summary layer.
 
-#====================
+# ==========================================================================================
 # Modified 3/1/2019
-# Error Encountered:
-#     Related to optional parameter of zUnits
-#	  File "C:\python_scripts\GitHub\HEL\HEL_Determination_by_AOI.py", line 517, in <module>
-#     zFactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(linearUnits)]
-#	  TypeError: list indices must be integers, not NoneType
+# - Error Encountered:
+#      Related to optional parameter of zUnits
+#	   File "C:\python_scripts\GitHub\HEL\HEL_Determination_by_AOI.py", line 517, in <module>
+#      zFactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(linearUnits)]
+#	   TypeError: list indices must be integers, not NoneType
 #
 # - Add Focal Statistics to Flow Length output to smooth it out
 # - switched method to exit python interpreter from exit() to sys.exit() and SystemExit Exception
 #   to catch errors.
-# - Switched some output layers to in-memory layer to optimize performance
-
+# - Switched ALL output layers to in-memory layers to optimize performance; Performance increased
+#   by at least 25%
+# - Updated the Determination Date to include the date the script was executed: mm/dd/yyyy
+# - In the 'Compute Summary of NEW HEL values' section the total CLU Acres were re-computed from the
+#   outTabulate table vs. looking them up from the 'helYesNo' fc b/c they wouldn't add up to 100%
+#   The outTabulate represents sums from raster cells vs. polygons.
+# - Wrapped main body into 'main' function and executed from if __name__ == '__main__':
+# - sys.exit() was throwing an exception and forcing a traceback to be printed.  Ignore traceback
+#   message if thrown by sys.exit()
 
 #-------------------------------------------------------------------------------
 
@@ -70,7 +78,7 @@ def AddMsgAndPrint(msg, severity=0):
     #
     #Split the message on \n first, so that if it's multiple lines, a GPMessage will be added for each line
     try:
-        print msg
+        #print msg
 
         #for string in msg.split('\n'):
             #Add a geoprocessing message (in case this is run as a tool)
@@ -88,11 +96,18 @@ def AddMsgAndPrint(msg, severity=0):
 
 ## ===================================================================================
 def errorMsg():
+# Print traceback exceptions.  If sys.exit was trapped by default exception then
+# ignore traceback message.
 
     try:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         theMsg = "\t" + traceback.format_exception(exc_type, exc_value, exc_traceback)[1] + "\n\t" + traceback.format_exception(exc_type, exc_value, exc_traceback)[-1]
-        AddMsgAndPrint(theMsg,2)
+
+        if theMsg.find("sys.exit") > -1:
+            AddMsgAndPrint("\n\n")
+            pass
+        else:
+            AddMsgAndPrint(theMsg,2)
 
     except:
         AddMsgAndPrint("Unhandled error in errorMsg method", 2)
@@ -351,7 +366,7 @@ import subprocess, operator, getpass, time
 from arcpy import env
 from arcpy.sa import *
 
-if __name__ == '__main__':
+def main():
 
     AOI = arcpy.GetParameter(0)
     cluLayer = arcpy.GetParameter(1)
@@ -365,15 +380,16 @@ if __name__ == '__main__':
     state = arcpy.GetParameterAsText(9)
     dcSignature = arcpy.GetParameterAsText(10)
 
-##    AOI = r'C:\python_scripts\HEL_MN\Sample\CLU_subset2.shp'
-##    cluLayer = r'C:\python_scripts\HEL_MN\Sample\clu_sample.shp'
-##    helLayer = r'C:\python_scripts\HEL_MN\Sample\HEL_sample.shp'
-##    kFactorFld = "K"
-##    tFactorFld = "T"
-##    rFactorFld = "R"
-##    helFld = "HEL"
-##    inputDEM = r'C:\python_scripts\HEL_MN\Sample\dem_03'
-##    zUnits = ""
+    ##    AOI = r'C:\python_scripts\HEL_MN\Sample\CLU_subset2.shp'
+    ##    cluLayer = r'C:\python_scripts\HEL_MN\Sample\clu_sample.shp'
+    ##    helLayer = r'C:\python_scripts\HEL_MN\Sample\HEL_sample.shp'
+    ##    kFactorFld = "K"
+    ##    tFactorFld = "T"
+    ##    rFactorFld = "R"
+    ##    helFld = "HEL"
+    ##    inputDEM = r'C:\python_scripts\HEL_MN\Sample\dem_03'
+    ##    zUnits = ""
+
 
     try:
 
@@ -488,6 +504,7 @@ if __name__ == '__main__':
         arcpy.CalculateField_management(helYesNo,calcAcreFld,"!shape.area@acres!","PYTHON_9.3")
         totalAcres = float("%.1f" % (sum([row[0] for row in arcpy.da.SearchCursor(helYesNo, (calcAcreFld))])))
         AddMsgAndPrint("\tTotal Acres: " + splitThousands(totalAcres))
+        del totalAcres
 
         """ ---------------------------------------------------------------------------------------------- Check DEM Coordinate System, Linear Units, Z-factor"""
         # lookup dictionary to convert XY units to area.  Key = XY unit of DEM; Value = conversion factor to sq.meters
@@ -703,48 +720,52 @@ if __name__ == '__main__':
         arcpy.SetProgressorPosition()
 
         """ -------------------------------------------------------------------------------------------------------------Extract DEM using CLU layer"""
+        ## All Raster layers produced will be in-memory only; Hopefully memory is not exceeded
+        ## To reverse uncomment line above and below and rename i.e. demExtract -> outExtractMask
+
         arcpy.SetProgressorLabel("Extracting DEM subset using buffered AOI")
         AddMsgAndPrint("\nExtracting DEM subset using buffered AOI")
-        demExtract = arcpy.CreateScratchName("demExtract",data_type="RasterDataset",workspace=scratchWS)
-        outExtractMask = ExtractByMask(inputDEM,cluBuffer)
-        outExtractMask.save(demExtract)
+        #demExtract = arcpy.CreateScratchName("demExtract",data_type="RasterDataset",workspace=scratchWS)
+        demExtract = ExtractByMask(inputDEM,cluBuffer)
+        #outExtractMask.save(demExtract)
         arcpy.SetProgressorPosition()
 
         """-------------------------------------------------------------------------------------------------------------  Create Slope Layer"""
         arcpy.SetProgressorLabel("Creating Slope Derivative")
         AddMsgAndPrint("\tCreating Slope Derivative")
-        slope = arcpy.CreateScratchName("slope",data_type="RasterDataset",workspace=scratchWS)
-        outSlope = Slope(demExtract,"PERCENT_RISE",zFactor)
-        outSlope.save(slope)
+        #slope = arcpy.CreateScratchName("slope",data_type="RasterDataset",workspace=scratchWS)
+        slope = Slope(demExtract,"PERCENT_RISE",zFactor)
+        #outSlope.save(slope)
         arcpy.SetProgressorPosition()
 
         """------------------------------------------------------------------------------------------------------------- Create Flow Direction and Flow Length"""
         arcpy.SetProgressorLabel("Calculating Flow Direction")
         AddMsgAndPrint("\tCalculating Flow Direction")
-        flowDirection = arcpy.CreateScratchName("flowDirection",data_type="RasterDataset",workspace=scratchWS)
-        outFlowDirection = FlowDirection(demExtract, "FORCE")
-        outFlowDirection.save(flowDirection)
+        #flowDirection = arcpy.CreateScratchName("flowDirection",data_type="RasterDataset",workspace=scratchWS)
+        flowDirection = FlowDirection(demExtract, "FORCE")
+        #outFlowDirection.save(flowDirection)
         arcpy.SetProgressorPosition()
 
         arcpy.SetProgressorLabel("Calculating Flow Length")
         AddMsgAndPrint("\tCalculating Flow Length")
-        preflowLength = arcpy.CreateScratchName("flowLength",data_type="RasterDataset",workspace=scratchWS)
-        outpreFlowLength = FlowLength(flowDirection,"UPSTREAM", "")
-        outpreFlowLength.save(preflowLength)
+        #preflowLength = arcpy.CreateScratchName("flowLength",data_type="RasterDataset",workspace=scratchWS)
+        preflowLength = FlowLength(flowDirection,"UPSTREAM", "")
+        #outpreFlowLength.save(preflowLength)
 
         # Run a focal statistics on flow length
         arcpy.SetProgressorLabel("Running Focal Statistics on Flow Length")
         AddMsgAndPrint("\tRunning Focal Statistics on Flow Length")
-        flowLength = arcpy.CreateScratchName("focStatsMax_FlowLength",data_type="RasterDataset",workspace=scratchWS)
-        outFocalStatistics = FocalStatistics(preflowLength, NbrRectangle(3,3,"CELL"),"MAXIMUM","DATA")
-        outFocalStatistics.save(flowLength)
+        #flowLength = arcpy.CreateScratchName("focStatsMax_FlowLength",data_type="RasterDataset",workspace=scratchWS)
+        flowLength = FocalStatistics(preflowLength, NbrRectangle(3,3,"CELL"),"MAXIMUM","DATA")
+        #outFocalStatistics.save(flowLength)
 
         # convert Flow Length distance units to feet if original DEM is not in feet.
         if not zUnits in ('Feet','Foot','Foot_US'):
             AddMsgAndPrint("\tConverting Flow Length Distance units to Feet")
-            flowLengthFT = arcpy.CreateScratchName("flowLength_FT",data_type="RasterDataset",workspace=scratchWS)
-            outflowLengthFT = Raster(flowLength) * 3.280839896
-            outflowLengthFT.save(flowLengthFT)
+            #flowLengthFT = arcpy.CreateScratchName("flowLength_FT",data_type="RasterDataset",workspace=scratchWS)
+            #outflowLengthFT = Raster(flowLength) * 3.280839896
+            flowLengthFT = flowLength * 3.280839896
+            #outflowLengthFT.save(flowLengthFT)
             arcpy.SetProgressorPosition()
 
         else:
@@ -758,9 +779,10 @@ if __name__ == '__main__':
         # ((0.065 +( 0.0456 * ("%slope%"))) +( 0.006541 * (Power("%slope%",2))))
         arcpy.SetProgressorLabel("Calculating S Factor")
         AddMsgAndPrint("\n\tCalculating S Factor")
-        sFactor = arcpy.CreateScratchName("sFactor",data_type="RasterDataset",workspace=scratchWS)
-        outsFactor = (Power(Raster(slope),2) * 0.006541) + ((Raster(slope) * 0.0456) + 0.065)
-        outsFactor.save(sFactor)
+        #sFactor = arcpy.CreateScratchName("sFactor",data_type="RasterDataset",workspace=scratchWS)
+        #outsFactor = (Power(Raster(slope),2) * 0.006541) + ((Raster(slope) * 0.0456) + 0.065)       ## Original Line
+        sFactor = (Power(slope,2) * 0.006541) + ((slope * 0.0456) + 0.065)
+        #outsFactor.save(sFactor)
         arcpy.SetProgressorPosition()
 
         # ------------------------------------------------------------------------------ Calculate L Factor
@@ -772,13 +794,21 @@ if __name__ == '__main__':
 
         arcpy.SetProgressorLabel("Calculating L Factor")
         AddMsgAndPrint("\tCalculating L Factor")
-        lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
+        #lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
 
-        outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.2),
-                        Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.3),
-                        Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.4),
-                        Power(Raster(flowLengthFT) / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
-        outlFactor.save(lFactor)
+        # Original outlFactor lines
+    ##        outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.2),
+    ##                        Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.3),
+    ##                        Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.4),
+    ##                        Power(Raster(flowLengthFT) / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
+
+        # Remove 'Raster' function from above
+        lFactor = Con(slope,Power(flowLengthFT / 72.5,0.2),
+                        Con(slope,Power(flowLengthFT / 72.5,0.3),
+                        Con(slope,Power(flowLengthFT / 72.5,0.4),
+                        Power(flowLengthFT / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
+
+        #outlFactor.save(lFactor)
 
         arcpy.SetProgressorPosition()
 
@@ -786,9 +816,10 @@ if __name__ == '__main__':
         # "%l_factor%" * "%s_factor%"
         arcpy.SetProgressorLabel("Calculating LS Factor")
         AddMsgAndPrint("\tCalculating LS Factor")
-        lsFactor = arcpy.CreateScratchName("lsFactor",data_type="RasterDataset",workspace=scratchWS)
-        outlsFactor = Raster(lFactor) * Raster(sFactor)
-        outlsFactor.save(lsFactor)
+        #lsFactor = arcpy.CreateScratchName("lsFactor",data_type="RasterDataset",workspace=scratchWS)
+        #outlsFactor = Raster(lFactor) * Raster(sFactor)  ## Original Line
+        lsFactor = lFactor * sFactor
+        #outlsFactor.save(lsFactor)
         arcpy.SetProgressorPosition()
         scratchLayers.append((sFactor,lFactor,lsFactor))
 
@@ -825,9 +856,10 @@ if __name__ == '__main__':
         """------------------------------------------------------------------------------------------------------------- Calculate EI Factor"""
         arcpy.SetProgressorLabel("Calculating EI Factor")
         AddMsgAndPrint("\nCalculating EI Factor")
-        eiFactor = arcpy.CreateScratchName("eiFactor", data_type="RasterDataset", workspace=scratchWS)
-        outEIfactor = Divide((Raster(lsFactor) * Raster(kFactor) * Raster(rFactor)),Raster(tFactor))
-        outEIfactor.save(eiFactor)
+        #eiFactor = arcpy.CreateScratchName("eiFactor", data_type="RasterDataset", workspace=scratchWS)
+        #outEIfactor = Divide((Raster(lsFactor) * Raster(kFactor) * Raster(rFactor)),Raster(tFactor))  # Original Lines
+        eiFactor = Divide((lsFactor * kFactor * rFactor),tFactor)
+        #outEIfactor.save(eiFactor)
         arcpy.SetProgressorPosition()
 
         """------------------------------------------------------------------------------------------------------------- Calculate Final HEL Factor"""
@@ -840,9 +872,10 @@ if __name__ == '__main__':
 
         arcpy.SetProgressorLabel("Calculating HEL Factor")
         AddMsgAndPrint("Calculating HEL Factor")
-        helFactor = arcpy.CreateScratchName("helFactor",data_type="RasterDataset",workspace=scratchWS)
-        outHELfactor = Con(Raster(helValue),Raster(eiFactor),Con(Raster(helValue),9,Raster(helValue),"VALUE=1"),"VALUE=0")
-        outHELfactor.save(helFactor)
+        #helFactor = arcpy.CreateScratchName("helFactor",data_type="RasterDataset",workspace=scratchWS)
+        #outHELfactor = Con(Raster(helValue),Raster(eiFactor),Con(Raster(helValue),9,Raster(helValue),"VALUE=1"),"VALUE=0")  ## Original Line
+        helFactor = Con(helValue,eiFactor,Con(helValue,9,helValue,"VALUE=1"),"VALUE=0")
+        #outHELfactor.save(helFactor)
 
         #finalHEL = arcpy.CreateScratchName("finalHEL",data_type="RasterDataset",workspace=scratchWS)
         # Reclassify values:
@@ -870,7 +903,7 @@ if __name__ == '__main__':
                 AddMsgAndPrint("\tWARNING: Entire Area is NHEL; No need to proceed. Halting Process",1)
                 sys.exit()
         else:
-            AddMsgAndPrint("\n\tReclassifying Failed",2)
+            AddMsgAndPrint("\n\tReclassifying helFactor Failed",2)
             sys.exit()
 
         fieldList = [HELacres,"HEL_Pct","HEL_YES"]
@@ -894,10 +927,17 @@ if __name__ == '__main__':
                 acreConversion = acreConversionDict.get(arcpy.Describe(helYesNo).SpatialReference.LinearUnitName)
 
                 helAcres = float(outTabulateValues[1]) / acreConversion
-                helPct = (helAcres / row[4]) * 100
-
                 nhelAcres = outTabulateValues[0] / acreConversion
-                nhelPct = (nhelAcres / row[4]) * 100
+
+                # WARNING - New acre percentages for HEL and NHEL areas did not add up exactly to
+                # 100% b/c they were being computed from raster cells and divided by polygon totals.
+                # Original way of computing new HEL and NHEL acres
+    ##                helPct = (helAcres / row[4]) * 100
+    ##                nhelPct = (nhelAcres / row[4]) * 100
+
+                totalAcres =  (outTabulateValues[0] + outTabulateValues[1]) / acreConversion
+                helPct = (helAcres / totalAcres) * 100
+                nhelPct = (nhelAcres / totalAcres) * 100
 
                 # set default values
                 row[0] = helAcres
@@ -937,10 +977,10 @@ if __name__ == '__main__':
         del tabulateFields,fieldList,cluDict,maxHelAcreLength,maxNHelAcreLength
         arcpy.SetProgressorPosition()
 
-        """---------------------------------------------------------------------------------------------- Prepare Symboloby for ArcMap is session exists"""
+        """----------------------------------------------------------------------------------------------------- Prepare Symboloby for ArcMap is session exists"""
         # this section was modified by Christiane Roy 10/17/2018 to remove information on labels on map and in TOC.
         try:
-            AddMsgAndPrint("\n")  # Strictly Formatting
+            #AddMsgAndPrint("\n")  # Strictly Formatting
 
             # List of layers to add to Arcmap (layer path, arcmap layer name)
             addToArcMap = [(finalHELmap,"Final HEL Map"),(helSummary,"HEL Summary Layer"),(helYesNo,"HEL YES NO")]
@@ -986,23 +1026,23 @@ if __name__ == '__main__':
                      arcpy.mapping.AddLayer(df, result, "TOP")
 
                 """ The following code will update the layer symbology for HEL Summary Layer"""
-##                # to NOT include AOI acres and percentage.
-##                if layer[1] == "HEL Summary Layer":
-##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-##                    # lyr.symbology.classLabels = ogHELsymbologyLabels
-##                    # lyr.visible = False
-##                    # arcpy.RefreshActiveView()
-##                    # arcpy.RefreshTOC()
-##                    # del ly
-##                    expression = """[HEL] & vbNewLine &  round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_AcrePct] ,1) & "%)" & vbNewLine """
-##                    if lyr.supports("LABELCLASSES"):
-##                        for lblClass in lyr.labelClasses:
-##                            if lblClass.showClassLabels:
-##                                lblClass.expression = expression
-##                        lyr.showLabels = True
-##                        arcpy.RefreshActiveView()
-##                        arcpy.RefreshTOC()
-##                    del lyr
+    ##                # to NOT include AOI acres and percentage.
+    ##                if layer[1] == "HEL Summary Layer":
+    ##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+    ##                    # lyr.symbology.classLabels = ogHELsymbologyLabels
+    ##                    # lyr.visible = False
+    ##                    # arcpy.RefreshActiveView()
+    ##                    # arcpy.RefreshTOC()
+    ##                    # del ly
+    ##                    expression = """[HEL] & vbNewLine &  round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_AcrePct] ,1) & "%)" & vbNewLine """
+    ##                    if lyr.supports("LABELCLASSES"):
+    ##                        for lblClass in lyr.labelClasses:
+    ##                            if lblClass.showClassLabels:
+    ##                                lblClass.expression = expression
+    ##                        lyr.showLabels = True
+    ##                        arcpy.RefreshActiveView()
+    ##                        arcpy.RefreshTOC()
+    ##                    del lyr
 
                 """ The following code will update the layer symbology for the Final HEL Map. """
                 # cannot add acres and percent "by AOI". acres and pecent can only be calculated by CLU field.
@@ -1079,13 +1119,13 @@ if __name__ == '__main__':
             AddMsgAndPrint("\tOpening 026 Form",0)
             subprocess.Popen([msAccessPath,helDatabase])
 
-        arcpy.SetProgressorLabel("Removing Temp Layers")
+        arcpy.SetProgressorLabel("Removing Temp Layers\n\n")
         AddMsgAndPrint("\nRemoving Temp Layers")
         removeScratchLayers()
 
-    except SystemExit():
-        removeScratchLayers()
-        pass
     except:
         removeScratchLayers()
         errorMsg()
+
+if __name__ == '__main__':
+    main()
