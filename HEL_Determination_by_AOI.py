@@ -1,5 +1,5 @@
 # ==========================================================================================
-# Name:        HEL Determination by AOI
+# Name:   HEL Determination by AOI
 #
 # Author: Adolfo.Diaz
 #         Region 10 GIS Specialist
@@ -15,7 +15,6 @@
 #         MN Area GIS Specialist
 # e-mail: christian.roy@mn.usda.gov
 # phone: 507.405.3580
-#
 
 # ==========================================================================================
 # Modified 10/24/2016
@@ -68,6 +67,19 @@
 # - Wrapped main body into 'main' function and executed from if __name__ == '__main__':
 # - sys.exit() was throwing an exception and forcing a traceback to be printed.  Ignore traceback
 #   message if thrown by sys.exit()
+
+# ==========================================================================================
+# Modified 3/14/2019
+# - The tool was updated so that it no longer exits when there is no PHEL present or final results
+#   are all HEL or NHEL.  The 'outTabulate' table had to be updated to add either 'VALUE_1' or
+#   'VALUE_2' field and calc'ed to 0 so that the script could finish.
+#
+# - Created 'cluAcreDict' to capture cluNumber and cluAcres during the original summary process.
+#   This dictionary is only used if final results are ALL HEL or ALL NHEL since acres don't need
+#   to be recalculated, especially from the tabulate areas results where the acreages may slightly
+#   differ b/c of pixel tabulation.  This way the acreages will always match the original figures.
+#
+# - 2 booleans (bOnlyHEL & bOnlyNHEL) were added to determine if final results are ALL HEL or NHEL
 
 #-------------------------------------------------------------------------------
 
@@ -573,7 +585,7 @@ def main():
         aoiCluIntersect = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS))
         arcpy.Intersect_analysis([helYesNo,helLayer],aoiCluIntersect,"ALL")
 
-        # Test intersection
+        # Test intersection --- Should we check the percentage of intersection here? what if only 50% overlap
         totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(aoiCluIntersect, ("SHAPE@AREA"))]) / acreConversionDict.get(arcpy.Describe(aoiCluIntersect).SpatialReference.LinearUnitName)
         if not totalIntAcres:
             AddMsgAndPrint("\tThere is no overlap between AOI and CLU Layer. EXITTING!",2)
@@ -644,8 +656,8 @@ def main():
 
         # Exit if no PHEL values were found
         if not helDict.has_key('PHEL'):
-            AddMsgAndPrint("\n\tWARNING: There are no PHEL values in HEL layer -- Exiting!",1)
-            sys.exit()
+            AddMsgAndPrint("\n\tWARNING: There are no PHEL values in HEL layer",1)
+            #sys.exit()
 
         # Inform user about NULL values
         if nullHEL:
@@ -674,6 +686,12 @@ def main():
         pivotFields = [fld.name for fld in arcpy.ListFields(ogHelSummaryStatsPivot)][1:]  # ['CLUNBR','HEL','NHEL','PHEL']
         numOfhelValues = len(pivotFields)
         maxAcreLength.sort(reverse=True)
+
+        # This dictionary will only be used if final results are all HEL or all NHEL
+        # to reference original acres and not use tabulate area acres.
+        # {cluNumber:cluAcres}
+        cluAcreDict = dict()
+
         AddMsgAndPrint("\n\tSummary by CLU:")
 
         with arcpy.da.SearchCursor(ogHelSummaryStatsPivot,pivotFields) as cursor:
@@ -681,6 +699,7 @@ def main():
 
                 AddMsgAndPrint("\t\tCLU #: " + str(row[0]))
                 cluAcres = sum([row[i] for i in range(1,numOfhelValues,1)])
+                cluAcreDict[row[0]] = cluAcres
 
                 for i in range(1,numOfhelValues,1):
                     acres =  str(round(row[i],1))
@@ -710,7 +729,7 @@ def main():
                 ogHELsymbologyLabels.append(val + " -- " + str(acres) +  secondSpace + " .ac -- " + str(pct) + " %")
                 del acres,pct,firstSpace,secondSpace
 
-        del totalIntAcres,helDict,validHELsymbologyValues,maxAcreLength
+        del helDict,validHELsymbologyValues,maxAcreLength
         arcpy.SetProgressorPosition()
 
         """ ------------------------------------------------------------------------------------------------------------- Buffer CLU (AOI) Layer by 300 Meters"""
@@ -866,8 +885,8 @@ def main():
         # Con("%hel_factor%"==0,"%EI_grid%",Con("%hel_factor%"==1,9,Con("%hel_factor%"==2,2)))
         # Create Conditional statement to reflect the following:
         # 1) HEL Value = 0 -- Take EI factor -- Depends
-        # 2) HEL Value = 1 -- Assign 9 -- This will be HEL
-        # 3) HEL Value = 2 -- Assign 2 (No action needed) -- This will be NHEL
+        # 2) HEL Value = 1 -- Assign 9
+        # 3) HEL Value = 2 -- Assign 2 (No action needed)
         # Anything above 8 is HEL
 
         arcpy.SetProgressorLabel("Calculating HEL Factor")
@@ -895,13 +914,23 @@ def main():
         tabulateFields = [fld.name for fld in arcpy.ListFields(outTabulate)][2:]
         scratchLayers.append((eiFactor,helFactor,outTabulate))
 
+        # Booleans to indicate
+        bOnlyHEL = False; bOnlyNHEL = False
+
         if len(tabulateFields):
             if not "VALUE_1" in tabulateFields:
-                AddMsgAndPrint("\tWARNING: Entire Area is HEL; No need to proceed. Halting Process",1)
-                sys.exit()
+                AddMsgAndPrint("\tWARNING: Entire Area is HEL",1)
+                arcpy.AddField_management(outTabulate,"VALUE_1","DOUBLE")
+                arcpy.CalculateField_management(outTabulate,"VALUE_1",0)
+                bOnlyHEL = True
+                #sys.exit()
+
             if not "VALUE_2" in tabulateFields:
-                AddMsgAndPrint("\tWARNING: Entire Area is NHEL; No need to proceed. Halting Process",1)
-                sys.exit()
+                AddMsgAndPrint("\tWARNING: Entire Area is NHEL",1)
+                arcpy.AddField_management(outTabulate,"VALUE_2","DOUBLE")
+                arcpy.CalculateField_management(outTabulate,"VALUE_2",0)
+                bOnlyNHEL = True
+                #sys.exit()
         else:
             AddMsgAndPrint("\n\tReclassifying helFactor Failed",2)
             sys.exit()
@@ -926,18 +955,33 @@ def main():
                 outTabulateValues = ([(rows[0],rows[1]) for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1","VALUE_2"), where_clause = expression)])[0]
                 acreConversion = acreConversionDict.get(arcpy.Describe(helYesNo).SpatialReference.LinearUnitName)
 
-                helAcres = float(outTabulateValues[1]) / acreConversion
-                nhelAcres = outTabulateValues[0] / acreConversion
+                # if results are completely HEL or NHEL then total clu acres from cluAcreDict b/c
+                # Sometimes the results will slightly vary b/c of the raster pixels.
+                # Otherwise compute them from the tabulateArea results.
+                if bOnlyHEL or bOnlyNHEL:
+                    if bOnlyHEL:
+                        helAcres = cluAcreDict.get(row[3])
+                        nhelAcres = 0.0
+                        helPct = 100.0
+                        nhelPct = 0.0
+                    else:
+                        nhelAcres = cluAcreDict.get(row[3])
+                        helAcres = 0.0
+                        helPct = 0.0
+                        nhelPct = 100.0
+                else:
+                    nhelAcres = outTabulateValues[0] / acreConversion
+                    helAcres = float(outTabulateValues[1]) / acreConversion
+
+                    totalAcres =  (outTabulateValues[0] + outTabulateValues[1]) / acreConversion
+                    helPct = (helAcres / totalAcres) * 100
+                    nhelPct = (nhelAcres / totalAcres) * 100
 
                 # WARNING - New acre percentages for HEL and NHEL areas did not add up exactly to
                 # 100% b/c they were being computed from raster cells and divided by polygon totals.
-                # Original way of computing new HEL and NHEL acres
+                # This is the original way of computing new HEL and NHEL acres
     ##                helPct = (helAcres / row[4]) * 100
     ##                nhelPct = (nhelAcres / row[4]) * 100
-
-                totalAcres =  (outTabulateValues[0] + outTabulateValues[1]) / acreConversion
-                helPct = (helAcres / totalAcres) * 100
-                nhelPct = (nhelAcres / totalAcres) * 100
 
                 # set default values
                 row[0] = helAcres
@@ -971,7 +1015,7 @@ def main():
             AddMsgAndPrint("\tCLU #: " + str(clu))
             AddMsgAndPrint("\t\tHEL Acres:  " + str(helAcres) + firstSpace + " .ac -- " + str(helPct) + " %")
             AddMsgAndPrint("\t\tNHEL Acres: " + str(nHelAcres) + secondSpace + " .ac -- " + str(nHelPct) + " %")
-            AddMsgAndPrint("\t\tHEL Determination: " + yesOrNo)
+            AddMsgAndPrint("\t\tHEL Determination: " + yesOrNo + "\n")
             del firstSpace,secondSpace,helAcres,helPct,nHelAcres,nHelPct,yesOrNo
 
         del tabulateFields,fieldList,cluDict,maxHelAcreLength,maxNHelAcreLength
