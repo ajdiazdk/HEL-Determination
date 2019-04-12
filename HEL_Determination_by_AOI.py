@@ -98,6 +98,9 @@
 #   or a CLU's acre percentage is greater or equal to 33.3% then it is "HEL" otherwise the
 #   rating is determined by its dominant acre HEL value.
 # - Set the 33.3% or 50 acre HEL rule when computing new HEL values after geoprocessing.
+# - Autopopulated 11th parameter of tool, DC Signature, to computer user name.  Assumption
+#   is made that the user is the DC. User could be the technician.
+# - Autopopulate 10th Parameter, State, by isolating state namne from user computer name.
 
 #-------------------------------------------------------------------------------
 
