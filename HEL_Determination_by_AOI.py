@@ -102,6 +102,10 @@
 #   is made that the user is the DC. User could be the technician.
 # - Autopopulate 10th Parameter, State, by isolating state namne from user computer name.
 
+# =================
+# Questions:
+# 1)
+
 #-------------------------------------------------------------------------------
 
 ## ===================================================================================
@@ -477,6 +481,122 @@ def populateForm():
         return False
         errorMsg()
 
+# ===================================================================================
+def AddLayersToArcMap():
+    # This Function will add necessary layers to ArcMap and prepare their
+    # symbology.  The 1026 form will also be prepared.
+
+    try:
+        #AddMsgAndPrint("\n")  # Strictly Formatting
+
+        # List of layers to add to Arcmap (layer path, arcmap layer name)
+        if bNoPHELvalues:
+            addToArcMap = [(helSummary,"HEL Summary Layer"),(helYesNo,"HEL YES NO")]
+        else:
+            addToArcMap = [(finalHELmap,"Final HEL Map"),(helSummary,"HEL Summary Layer"),(helYesNo,"HEL YES NO")]
+
+        # Put this section in a try-except. It will fail if run from ArcCatalog
+        mxd = arcpy.mapping.MapDocument("CURRENT")
+        df = arcpy.mapping.ListDataFrames(mxd)[0]
+
+        # redundant workaround.  ListLayers returns a list of layer objects
+        # had to create a list of layer name Strings in order to see if a
+        # specific layer currently exists in Arcmap.
+        currentLayersObj = arcpy.mapping.ListLayers(mxd)
+        currentLayersStr = [str(x) for x in arcpy.mapping.ListLayers(mxd)]
+
+        for layer in addToArcMap:
+
+            # remove layer from ArcMap if it exists
+            if layer[1] in currentLayersStr:
+                arcpy.mapping.RemoveLayer(df,currentLayersObj[currentLayersStr.index(layer[1])])
+
+            if layer[1] == "Final HEL Map":
+                tempLayer = arcpy.MakeRasterLayer_management(layer[0],layer[1])
+            else:
+                tempLayer = arcpy.MakeFeatureLayer_management(layer[0],layer[1])
+
+            result = tempLayer.getOutput(0)
+            symbology = os.path.join(os.path.dirname(sys.argv[0]),layer[1].lower().replace(" ","") + ".lyr")
+
+            arcpy.ApplySymbologyFromLayer_management(result,symbology)
+
+            # The HEL Summary Layer that was being added to ArcMap had duplicate
+            # labels in spite of being multi-part.  By adding the .lyr file
+            # to ArcMap instead of the feature class (don't understand why)
+            if layer[1] == "HEL Summary Layer":
+                 helSummaryLYR = arcpy.mapping.Layer(symbology)
+                 arcpy.mapping.AddLayer(df, helSummaryLYR, "TOP")
+
+                 # turn layer off
+                 for lyr in arcpy.mapping.ListLayers(mxd, layer[1]):
+                     lyr.visible = False
+
+            else:
+                 arcpy.mapping.AddLayer(df, result, "TOP")
+
+            """ The following code will update the layer symbology for HEL Summary Layer"""
+##                # to NOT include AOI acres and percentage.
+##                if layer[1] == "HEL Summary Layer":
+##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+##                    # lyr.symbology.classLabels = ogHELsymbologyLabels
+##                    # lyr.visible = False
+##                    # arcpy.RefreshActiveView()
+##                    # arcpy.RefreshTOC()
+##                    # del ly
+##                    expression = """[HEL] & vbNewLine &  round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_AcrePct] ,1) & "%)" & vbNewLine """
+##                    if lyr.supports("LABELCLASSES"):
+##                        for lblClass in lyr.labelClasses:
+##                            if lblClass.showClassLabels:
+##                                lblClass.expression = expression
+##                        lyr.showLabels = True
+##                        arcpy.RefreshActiveView()
+##                        arcpy.RefreshTOC()
+##                    del lyr
+
+            """ The following code will update the layer symbology for the Final HEL Map. """
+            # cannot add acres and percent "by AOI". acres and pecent can only be calculated by CLU field.
+            if layer[1] == "Final HEL Map":
+                lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+                newHELsymbologyLabels = []
+                acreConversion = acreConversionDict.get(arcpy.Describe(helYesNo).SpatialReference.LinearUnitName)
+
+                # This assumes that both "VALUE_1 and VALUE_2 are present
+                HEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"))])/acreConversion
+                NHEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1"))])/acreConversion
+
+                if HEL > 0:
+                   newHELsymbologyLabels.append("HEL")
+
+                if NHEL > 0:
+                   newHELsymbologyLabels.append("NHEL")
+
+                lyr.symbology.classBreakLabels = newHELsymbologyLabels
+                arcpy.RefreshActiveView()
+                arcpy.RefreshTOC()
+                del lyr,newHELsymbologyLabels
+
+            if layer[1] == "HEL YES NO":
+                lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
+                #expression = """def FindLabel ( [CLUNBR], [HEL_Acres], [HEL_AcrePct], [HEL_YES] ):  return "CLU #: " + [CLUNBR] + "\nHEL Acres: " + str(round(float([HEL_Acres]),1)) + " (" + str(round(float( [HEL_Pct] ),1)) + "%)\nHEL: " + [HEL_YES]"""
+                expression = """"Tract: " & [TRACTNBR] & vbNewLine & "CLU #: " & [CLUNBR] & vbNewLine & "HEL: " & round([HEL_Acres] ,1) & " ac." & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & "HEL: " & [HEL_YES]"""
+
+                if lyr.supports("LABELCLASSES"):
+                    for lblClass in lyr.labelClasses:
+                        if lblClass.showClassLabels:
+                            lblClass.expression = expression
+                    lyr.showLabels = True
+                    arcpy.RefreshActiveView()
+                    arcpy.RefreshTOC()
+
+            AddMsgAndPrint("Added " + layer[1] + " to your ArcMap Session",0)
+
+    except:
+        errorMsg()
+        pass
+
+
+
 ## =============================================== Main Body ====================================================
 
 import sys, string, os, locale, traceback, urllib, re, arcpy, datetime
@@ -686,8 +806,8 @@ if __name__ == '__main__':
         """ ------------------------------------------------------------------------------------------------------------- Compute Summary of original HEL values"""
 
         # -------------------------------------------------------------------------- Intersect helYesNo (CLU & AOI) with soils (helLayer) -> cluHELintersect
-        arcpy.SetProgressorLabel("Computing summary of original HEL Values")
         AddMsgAndPrint("\nComputing summary of original HEL Values")
+        arcpy.SetProgressorLabel("Computing summary of original HEL Values")
         cluHELintersect = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS))
         #cluHELintersect = arcpy.CreateScratchName("aoiCLUIntersect",data_type="FeatureClass",workspace=scratchWS)
         arcpy.Intersect_analysis([helYesNo,helLayer],cluHELintersect,"ALL")
@@ -697,23 +817,45 @@ if __name__ == '__main__':
         totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(cluHELintersect, ("SHAPE@AREA"))]) / acreConversionDict.get(arcpy.Describe(cluHELintersect).SpatialReference.LinearUnitName)
         if not totalIntAcres:
             AddMsgAndPrint("\tThere is no overlap between AOI and CLU Layer. EXITTING!",2)
+            removeScratchLayers()
             sys.exit()
 
         # -------------------------------------------------------------------------- Dissolve intersection output by the following fields -> helSummary
+        # check for critical fields in CLU layer; exit if missing
         cluNumberFld = "CLUNBR"
-        dissovleFlds = ["CLUNBR","TRACTNBR","FARMNBR","COUNTYCD","CALCACRES"]
+        dissovleFlds = [cluNumberFld,"TRACTNBR","FARMNBR","COUNTYCD","CALCACRES"]
         for fld in dissovleFlds:
             if not FindField(helYesNo,fld):
                 AddMsgAndPrint("\n\tMissing CLU Layer field: " + fld + " ---- Exiting!",2)
+                removeScratchLayers()
                 sys.exit()
 
         dissovleFlds.append(helFld)
         arcpy.Dissolve_management(cluHELintersect, helSummary, dissovleFlds, "","MULTI_PART", "DISSOLVE_LINES")
 
+        # -------------------------------------------------------------------------- Make sure TRACTNBR and FARMNBR  are uniqe; exit otherwise
+        uniqueTracts = set([row[0] for row in arcpy.da.SearchCursor(helSummary,("TRACTNBR"))])
+        uniqueFarm   = set([row[0] for row in arcpy.da.SearchCursor(helSummary,("FARMNBR"))])
+
+        if len(uniqueTracts) != 1:
+           AddMsgAndPrint("\n\tThere are " + str(len(uniqueTracts)) + " different Tract Numbers. Exiting!",2)
+           for tract in uniqueTracts:
+               AddMsgAndPrint("\t\tTract #: " + str(tract),2)
+           removeScratchLayers
+           sys.exit()
+
+        if len(uniqueFarm) != 1:
+           AddMsgAndPrint("\n\tThere are " + str(len(uniqueFarm)) + " different Farm Numbers. Exiting!",2)
+           for farm in uniqueFarm:
+               AddMsgAndPrint("\t\tFarm #: " + str(farm),2)
+           removeScratchLayers
+           sys.exit()
+        del uniqueTracts,uniqueFarm
+
         # --------------------------------------------------------------------------- Add and Update fields in the HEL Summary Layer (HEL Value, HEL Acres, HEL_Pct)
-        HELvalueFld = 'ogHELValue'    # Used for raster purposes
-        HELacres = 'ogHEL_Acres'
-        HELacrePct = 'ogHEL_AcrePct'
+        HELvalueFld = 'HELValue'    # Used for raster purposes
+        HELacres = 'HEL_Acres'
+        HELacrePct = 'HEL_AcrePct'
 
         if not len(arcpy.ListFields(helSummary,HELvalueFld)) > 0:
             arcpy.AddField_management(helSummary,HELvalueFld,"SHORT")
@@ -889,8 +1031,12 @@ if __name__ == '__main__':
 
         del helDict,validHELsymbologyValues,maxAcreLength
 
-        # If there are no PHEL Values
+        # If there are no PHEL Values add helSummary and helYesNo layers to ArcMap
+        # and prepare 1026 form.  Skip geoProcessing.
         if bNoPHELvalues:
+
+            AddLayersToArcMap()
+
             if bAccess:
                 populateForm()
             sys.exit()
@@ -1202,113 +1348,8 @@ if __name__ == '__main__':
         del tabulateFields,fieldList,cluDict,maxHelAcreLength,maxNHelAcreLength
         arcpy.SetProgressorPosition()
 
-        """----------------------------------------------------------------------------------------------------- Prepare Symboloby for ArcMap is session exists"""
-        # this section was modified by Christiane Roy 10/17/2018 to remove information on labels on map and in TOC.
-        try:
-            #AddMsgAndPrint("\n")  # Strictly Formatting
-
-            # List of layers to add to Arcmap (layer path, arcmap layer name)
-            addToArcMap = [(finalHELmap,"Final HEL Map"),(helSummary,"HEL Summary Layer"),(helYesNo,"HEL YES NO")]
-
-            # Put this section in a try-except. It will fail if run from ArcCatalog
-            mxd = arcpy.mapping.MapDocument("CURRENT")
-            df = arcpy.mapping.ListDataFrames(mxd)[0]
-
-            # redundant workaround.  ListLayers returns a list of layer objects
-            # had to create a list of layer name Strings in order to see if a
-            # specific layer currently exists in Arcmap.
-            currentLayersObj = arcpy.mapping.ListLayers(mxd)
-            currentLayersStr = [str(x) for x in arcpy.mapping.ListLayers(mxd)]
-
-            for layer in addToArcMap:
-
-                # remove layer from ArcMap if it exists
-                if layer[1] in currentLayersStr:
-                    arcpy.mapping.RemoveLayer(df,currentLayersObj[currentLayersStr.index(layer[1])])
-
-                if layer[1] == "Final HEL Map":
-                    tempLayer = arcpy.MakeRasterLayer_management(layer[0],layer[1])
-                else:
-                    tempLayer = arcpy.MakeFeatureLayer_management(layer[0],layer[1])
-
-                result = tempLayer.getOutput(0)
-                symbology = os.path.join(os.path.dirname(sys.argv[0]),layer[1].lower().replace(" ","") + ".lyr")
-
-                arcpy.ApplySymbologyFromLayer_management(result,symbology)
-
-                # The HEL Summary Layer that was being added to ArcMap had duplicate
-                # labels in spite of being multi-part.  By adding the .lyr file
-                # to ArcMap instead of the feature class (don't understand why)
-                if layer[1] == "HEL Summary Layer":
-                     helSummaryLYR = arcpy.mapping.Layer(symbology)
-                     arcpy.mapping.AddLayer(df, helSummaryLYR, "TOP")
-
-                     # turn layer off
-                     for lyr in arcpy.mapping.ListLayers(mxd, layer[1]):
-                         lyr.visible = False
-
-                else:
-                     arcpy.mapping.AddLayer(df, result, "TOP")
-
-                """ The following code will update the layer symbology for HEL Summary Layer"""
-    ##                # to NOT include AOI acres and percentage.
-    ##                if layer[1] == "HEL Summary Layer":
-    ##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-    ##                    # lyr.symbology.classLabels = ogHELsymbologyLabels
-    ##                    # lyr.visible = False
-    ##                    # arcpy.RefreshActiveView()
-    ##                    # arcpy.RefreshTOC()
-    ##                    # del ly
-    ##                    expression = """[HEL] & vbNewLine &  round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_AcrePct] ,1) & "%)" & vbNewLine """
-    ##                    if lyr.supports("LABELCLASSES"):
-    ##                        for lblClass in lyr.labelClasses:
-    ##                            if lblClass.showClassLabels:
-    ##                                lblClass.expression = expression
-    ##                        lyr.showLabels = True
-    ##                        arcpy.RefreshActiveView()
-    ##                        arcpy.RefreshTOC()
-    ##                    del lyr
-
-                """ The following code will update the layer symbology for the Final HEL Map. """
-                # cannot add acres and percent "by AOI". acres and pecent can only be calculated by CLU field.
-                if layer[1] == "Final HEL Map":
-                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-                    newHELsymbologyLabels = []
-                    acreConversion = acreConversionDict.get(arcpy.Describe(helYesNo).SpatialReference.LinearUnitName)
-
-                    # This assumes that both "VALUE_1 and VALUE_2 are present
-                    HEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_2"))])/acreConversion
-                    NHEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outTabulate, ("VALUE_1"))])/acreConversion
-
-                    if HEL > 0:
-                       newHELsymbologyLabels.append("HEL")
-
-                    if NHEL > 0:
-                       newHELsymbologyLabels.append("NHEL")
-
-                    lyr.symbology.classBreakLabels = newHELsymbologyLabels
-                    arcpy.RefreshActiveView()
-                    arcpy.RefreshTOC()
-                    del lyr,newHELsymbologyLabels
-
-                if layer[1] == "HEL YES NO":
-                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-                    #expression = """def FindLabel ( [CLUNBR], [HEL_Acres], [HEL_Pct], [HEL_YES] ):  return "CLU #: " + [CLUNBR] + "\nHEL Acres: " + str(round(float([HEL_Acres]),1)) + " (" + str(round(float( [HEL_Pct] ),1)) + "%)\nHEL: " + [HEL_YES]"""
-                    expression = """"T: " & [TRACTNBR] & vbNewLine & "#" & [CLUNBR] & vbNewLine & round([CALCACRES],1)& "ac." & vbNewLine & "HEL: " & round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & "HEL: " & [HEL_YES]"""
-
-                    if lyr.supports("LABELCLASSES"):
-                        for lblClass in lyr.labelClasses:
-                            if lblClass.showClassLabels:
-                                lblClass.expression = expression
-                        lyr.showLabels = True
-                        arcpy.RefreshActiveView()
-                        arcpy.RefreshTOC()
-
-                AddMsgAndPrint("Added " + layer[1] + " to your ArcMap Session",0)
-
-        except:
-            errorMsg()
-            pass
+        """----------------------------------------------------------------------------------------------------- Prepare Symboloby for ArcMap and 1026 form"""
+        AddLayersToArcMap()
 
         if bAccess:
             if not populateForm():
@@ -1321,5 +1362,3 @@ if __name__ == '__main__':
     except:
         removeScratchLayers()
         errorMsg()
-
-
