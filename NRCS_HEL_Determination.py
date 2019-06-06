@@ -174,6 +174,16 @@
 # 17) Added code to verify that a subset of CLU fields were selected otherwise the
 #     tool will exit.  This will prevent an entire CLU layer from being executed.
 # 18) Remove all progress positions. very minor!
+# 19) Exit if there are any NULLs or invalid HEL labels.  Previously this was only
+#     set as a WARNING.  Now it is an ERROR.
+# 20) Removed the state parameter from the tool and instead mined the state from
+#     the field determination layer.  A dictionary was created to be used as a
+#     conversion from state fips code to state abbreviation.  If obtaining the state
+#     abbreviation fails using the dictionary the state name will be extracted from
+#     the user computer name.
+# 21) All .lyr files were set to relative path and description populated.
+# 22) Validation code was updated to autopopulate layers and fields based on the
+#     newly adopted naming convention of layers and field schema.
 
 #-------------------------------------------------------------------------------
 
@@ -682,13 +692,13 @@ def extractDEM(inputDEM,zUnits):
         # unless DEM is an image service.
         if not bImageService and sr.type != 'Projected':
             AddMsgAndPrint("\n\t" + str(desc.name) + " Must be in a projected coordinate system, Exiting",2)
-            AddMsgAndPrint("\tContact your state GIS Coordinator to resolve this issue",2)
+            AddMsgAndPrint("\tContact your State GIS Coordinator to resolve this issue",2)
             return False,False
 
         # Linear units must be in Meters or Feet
         if not linearUnits:
             AddMsgAndPrint("\n\tCould not determine linear units of DEM....Exiting!",2)
-            AddMsgAndPrint("\tContact your state GIS Coordinator to resolve this issue",2)
+            AddMsgAndPrint("\tContact your State GIS Coordinator to resolve this issue",2)
             return False,False
 
         if linearUnits == "Meter":
@@ -699,14 +709,14 @@ def extractDEM(inputDEM,zUnits):
             tolerance = 9.84252
         else:
             AddMsgAndPrint("\n\tHorizontal units of " + str(desc.baseName) + " must be in feet or meters... Exiting!")
-            AddMsgAndPrint("\tContact your state GIS Coordinator to resolve this issue",2)
+            AddMsgAndPrint("\tContact your State GIS Coordinator to resolve this issue",2)
             return False,False
 
         # Cell size must be the equivalent of 3 meters.
         if cellSize > tolerance:
             AddMsgAndPrint("\n\tThe cell size of the input DEM must be 3 Meters (9.84252 FT) or less to continue... Exiting!",2)
             AddMsgAndPrint("\t" + str(desc.baseName) + " has a cell size of " + str(desc.MeanCellWidth) + " " + linearUnits,2)
-            AddMsgAndPrint("\tContact your state GIS Coordinator to resolve this issue",2)
+            AddMsgAndPrint("\tContact your State GIS Coordinator to resolve this issue",2)
             return False,False
         elif cellSize < tolerance:
             bResample = True
@@ -848,9 +858,30 @@ def populateForm():
                     cursor.updateRow(row)
             del cursor
 
-        # Collect Time information
+        # ---------------------------------------------------------------------  Collect Time information
         today = datetime.date.today()
         today = today.strftime('%b %d, %Y')
+
+        # ---------------------------------------------------------------------- Get State Abbreviation
+        stateCodeDict = {'WA': '53', 'DE': '10', 'DC': '11', 'WI': '55', 'WV': '54', 'HI': '15',
+                        'FL': '12', 'WY': '56', 'PR': '72', 'NJ': '34', 'NM': '35', 'TX': '48',
+                        'LA': '22', 'NC': '37', 'ND': '38', 'NE': '31', 'TN': '47', 'NY': '36',
+                        'PA': '42', 'AK': '02', 'NV': '32', 'NH': '33', 'VA': '51', 'CO': '08',
+                        'CA': '06', 'AL': '01', 'AR': '05', 'VT': '50', 'IL': '17', 'GA': '13',
+                        'IN': '18', 'IA': '19', 'MA': '25', 'AZ': '04', 'ID': '16', 'CT': '09',
+                        'ME': '23', 'MD': '24', 'OK': '40', 'OH': '39', 'UT': '49', 'MO': '29',
+                        'MN': '27', 'MI': '26', 'RI': '44', 'KS': '20', 'MT': '30', 'MS': '28',
+                        'SC': '45', 'KY': '21', 'OR': '41', 'SD': '46'}
+
+        stateCode = ([row[0] for row in arcpy.da.SearchCursor(fieldDetermination,"STATECD")])
+
+        # Try to get the state using the field determination layer
+        if stateCode:
+            state = [stAbbrev for (stAbbrev, code) in stateCodeDict.items() if code == stateCode[0]][0]
+
+        # Otherwise get the state from the computer user name
+        else:
+            state = getpass.getuser().replace('.',' ').replace('\'','')
 
         # Add 18 Fields to the fieldDetermination feature class
         fieldDict = {"Signature":("TEXT",dcSignature,50),"SoilAvailable":("TEXT","Yes",5),"Completion":("TEXT","Office",10),
@@ -1077,9 +1108,9 @@ def AddLayersToArcMap():
                 arcpy.mapping.UpdateLayer(df,updateLayer,sourceLayer)
 
             else:
-                 # add layer to arcmap
-                 symbologyLyr = os.path.join(os.path.dirname(sys.argv[0]),layer[1].lower().replace(" ","") + ".lyr")
-                 arcpy.mapping.AddLayer(df, arcpy.mapping.Layer(symbologyLyr), "TOP")
+                # add layer to arcmap
+                symbologyLyr = os.path.join(os.path.dirname(sys.argv[0]),layer[1].lower().replace(" ","") + ".lyr")
+                arcpy.mapping.AddLayer(df, arcpy.mapping.Layer(symbologyLyr.strip("'")), "TOP")
 
             # This layer should be turned on if no PHEL values were processed.
             # Symbology should also be updated to reflect current values.
@@ -1097,7 +1128,7 @@ def AddLayersToArcMap():
         # Unselect CLU polygons; Looks goofy after processed layers have been added to ArcMap
         # Turn it off as well
         for lyr in arcpy.mapping.ListLayers(mxd, arcpy.Describe(cluLayer).basename, df):
-            #arcpy.SelectLayerByAttribute_management(lyr, "CLEAR_SELECTION")
+            arcpy.SelectLayerByAttribute_management(lyr, "CLEAR_SELECTION")
             lyr.visible = False
 
         # Turn off the original HEL layer to put the outputs into focus
@@ -1105,8 +1136,8 @@ def AddLayersToArcMap():
         helLyr.visible = False
 
         # set dataframe extent to the extent of the Field Determintation layer
-##        fdLayer = arcpy.mapping.ListLayers(mxd, addToArcMap[2][1], df)[0]
-##        df.extent = fdLayer.getSelectedExtent()
+        fdLayer = arcpy.mapping.ListLayers(mxd, addToArcMap[2][1], df)[0]
+        df.extent = fdLayer.getSelectedExtent()
 
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
@@ -1163,12 +1194,12 @@ if __name__ == '__main__':
         try:
             killAccess = os.system("TASKKILL /F /IM msaccess.exe")
             if killAccess == 0:
-                AddMsgAndPrint("\nMicrosoft Access was closed in order to continue")
+                AddMsgAndPrint("\tMicrosoft Access was closed in order to continue")
 
             accessLockFile = os.path.dirname(sys.argv[0]) + os.sep + r'HEL.ldb'
             if os.path.exists(accessLockFile):
                os.remove(accessLockFile)
-               time.sleep(1)
+            time.sleep(2)
         except:
             pass
 
@@ -1184,7 +1215,7 @@ if __name__ == '__main__':
                 try:
                     arcpy.Delete_management(layer)
                 except:
-                    AddMsgAndPrint("\nCould not delete the " + os.path.basename(layer) + " feature class in the HEL access database. Creating an additional layer",2)
+                    AddMsgAndPrint("\tCould not delete the " + os.path.basename(layer) + " feature class in the HEL access database. Creating an additional layer",2)
                     newName = str(layer)
                     newName = arcpy.CreateScratchName(os.path.basename(layer),data_type="FeatureClass",workspace=helDatabase)
 
@@ -1332,25 +1363,6 @@ if __name__ == '__main__':
         # Dissolve the cluHELintersect to report input summary
         arcpy.Dissolve_management(cluHELintersect, helSummary, dissovleFlds, "","MULTI_PART", "DISSOLVE_LINES")
 
-        # -------------------------------------------------------------------------- Make sure TRACTNBR and FARMNBR  are uniqe; exit otherwise
-        uniqueTracts = set([row[0] for row in arcpy.da.SearchCursor(helSummary,("TRACTNBR"))])
-        uniqueFarm   = set([row[0] for row in arcpy.da.SearchCursor(helSummary,("FARMNBR"))])
-
-        if len(uniqueTracts) != 1:
-           AddMsgAndPrint("\n\tThere are " + str(len(uniqueTracts)) + " different Tract Numbers. Exiting!",2)
-           for tract in uniqueTracts:
-               AddMsgAndPrint("\t\tTract #: " + str(tract),2)
-           removeScratchLayers
-           sys.exit()
-
-        if len(uniqueFarm) != 1:
-           AddMsgAndPrint("\n\tThere are " + str(len(uniqueFarm)) + " different Farm Numbers. Exiting!",2)
-           for farm in uniqueFarm:
-               AddMsgAndPrint("\t\tFarm #: " + str(farm),2)
-           removeScratchLayers
-           sys.exit()
-        del uniqueTracts,uniqueFarm
-
         # --------------------------------------------------------------------------- Add and Update fields in the HEL Summary Layer (Og_HELcode, Og_HEL_Acres, Og_HEL_AcrePct)
         # Add 3 fields to the intersected layer.  The intersected 'clueHELintersect' layer will
         # be used for the dissolve process and at the end of the script.
@@ -1418,15 +1430,19 @@ if __name__ == '__main__':
             #AddMsgAndPrint("\n\tWARNING: There are no PHEL values in HEL layer",1)
             bNoPHELvalues = True
 
-        # Inform user about NULL values ------------------- Should I exit here? Maybe add it to validation code?
+        # Inform user about NULL values; Exit if any NULLs exist.
         if nullHEL > 0:
-            AddMsgAndPrint("\n\tWARNING: There are " + str(nullHEL) + " polygon(s) with no HEL values",1)
+            AddMsgAndPrint("\n\tERROR: There are " + str(nullHEL) + " polygon(s) with missing HEL values. EXITING!",2)
+            removeScratchLayers()
+            sys.exit()
 
-        # Inform user about invalid HEL values (not PHEL,HEL, NHEL) ------------------- Should I exit here? Maybe add it to validation code?
+        # Inform user about invalid HEL values (not PHEL,HEL, NHEL); Exit if invalid values exist.
         if wrongHELvalues:
-            AddMsgAndPrint("\n\tWARNING: There is " + str(len(set(wrongHELvalues))) + " incorrect HEL values in HEL Layer:",1)
+            AddMsgAndPrint("\n\tERROR: There is " + str(len(set(wrongHELvalues))) + " invalid HEL values in HEL Layer:",1)
             for wrongVal in set(wrongHELvalues):
                 AddMsgAndPrint("\t\t" + wrongVal)
+            removeScratchLayers()
+            sys.exit()
 
         del dissovleFlds,nullHEL,wrongHELvalues
 
@@ -1961,6 +1977,8 @@ if __name__ == '__main__':
                AddMsgAndPrint("\nFailure to correclty populate 1026 form",2)
 
         removeScratchLayers()
+        arcpy.SetProgressorLabel("")
+        AddMsgAndPrint("\n")
 
     except:
         #removeScratchLayers()
