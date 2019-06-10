@@ -589,7 +589,7 @@ def extractDEMfromImageService(demSource,zUnits):
     # Returns a clipped DEM and new Z-Factor
 
     try:
-        startTime = tic()
+        #startTime = tic()
         desc = arcpy.Describe(demSource)
         sr = desc.SpatialReference
         cellSize = desc.MeanCellWidth
@@ -639,7 +639,7 @@ def extractDEMfromImageService(demSource,zUnits):
         AddMsgAndPrint("\t\tCell Size: " + str(newCellSize) + " " + newLinearUnits )
         AddMsgAndPrint("\t\tZ-Factor: " + str(newZfactor))
 
-        AddMsgAndPrint(toc(startTime))
+        #AddMsgAndPrint(toc(startTime))
         return newZfactor,demExtract
 
     except:
@@ -873,14 +873,12 @@ def populateForm():
                         'MN': '27', 'MI': '26', 'RI': '44', 'KS': '20', 'MT': '30', 'MS': '28',
                         'SC': '45', 'KY': '21', 'OR': '41', 'SD': '46'}
 
-        stateCode = ([row[0] for row in arcpy.da.SearchCursor(fieldDetermination,"STATECD")])
-
         # Try to get the state using the field determination layer
-        if stateCode:
+        try:
+            stateCode = ([row[0] for row in arcpy.da.SearchCursor(fieldDetermination,"STATECD")])
             state = [stAbbrev for (stAbbrev, code) in stateCodeDict.items() if code == stateCode[0]][0]
-
         # Otherwise get the state from the computer user name
-        else:
+        except:
             state = getpass.getuser().replace('.',' ').replace('\'','')
 
         # Add 18 Fields to the fieldDetermination feature class
@@ -1127,12 +1125,12 @@ def AddLayersToArcMap():
 
         # Unselect CLU polygons; Looks goofy after processed layers have been added to ArcMap
         # Turn it off as well
-        for lyr in arcpy.mapping.ListLayers(mxd, arcpy.Describe(cluLayer).basename, df):
+        for lyr in arcpy.mapping.ListLayers(mxd, arcpy.Describe(cluLayer).nameString, df):
             arcpy.SelectLayerByAttribute_management(lyr, "CLEAR_SELECTION")
             lyr.visible = False
 
         # Turn off the original HEL layer to put the outputs into focus
-        helLyr = arcpy.mapping.ListLayers(mxd, arcpy.Describe(helLayer).basename, df)[0]
+        helLyr = arcpy.mapping.ListLayers(mxd, arcpy.Describe(helLayer).nameString, df)[0]
         helLyr.visible = False
 
         # set dataframe extent to the extent of the Field Determintation layer
@@ -1157,15 +1155,15 @@ if __name__ == '__main__':
     try:
         cluLayer = arcpy.GetParameter(0)
         helLayer = arcpy.GetParameter(1)
-        kFactorFld = arcpy.GetParameterAsText(2)
-        tFactorFld = arcpy.GetParameterAsText(3)
-        rFactorFld = arcpy.GetParameterAsText(4)
-        helFld = arcpy.GetParameterAsText(5)
-        inputDEM = arcpy.GetParameter(6)
-        zUnits = arcpy.GetParameterAsText(7)
-        state = arcpy.GetParameterAsText(8)
-        dcSignature = arcpy.GetParameterAsText(9)
+        inputDEM = arcpy.GetParameter(2)
+        zUnits = arcpy.GetParameterAsText(3)
+        dcSignature = arcpy.GetParameterAsText(4)
         stateThreshold = 50
+
+        kFactorFld = "K"
+        tFactorFld = "T"
+        rFactorFld = "R"
+        helFld = "MUHELCL"
 
         bLog = False # boolean to begin logging to text file.
         arcpy.SetProgressorLabel("Checking input values and environments")
@@ -1201,6 +1199,7 @@ if __name__ == '__main__':
                os.remove(accessLockFile)
             time.sleep(2)
         except:
+            time.sleep(2)
             pass
 
         # ---------------------------------------------------------------------- establish path to access database layers

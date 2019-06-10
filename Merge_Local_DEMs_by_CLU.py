@@ -253,7 +253,7 @@ import arcpy, sys, os, traceback
 
 try:
 
-    source_clu = arcpy.GetParameterAsText(0)
+    source_clu = arcpy.GetParameter(0)
     source_dems = arcpy.GetParameterAsText(1).split(";")
 
     # Set environmental variables
@@ -272,26 +272,24 @@ try:
 
     # Make sure at least 2 datasets to be merged were entered
     datasets = len(source_dems)
-
     if datasets < 2:
         arcpy.AddError("\nOnly one input DEM layer selected. If you need multiple layers, please run again and select multiple DEM files... Exiting!\n")
         sys.exit()
 
-    # Define and set the scratch workspace
-##    scratchWS = setScratchWorkspace()
-##    arcpy.env.scratchWorkspace = scratchWS
-##
-##    if not scratchWS:
-##        arcpy.AddError("\nCould not set scratch workspace... Exiting!\n")
-##        sys.exit()
-
-    # Set scratch directory
+    # define and set the scratch workspace
     scratchWS = os.path.dirname(sys.argv[0]) + os.sep + r'scratch.gdb'
+    if not arcpy.Exists(scratchWS):
+       scratchWS = setScratchWorkspace()
+
+    if not scratchWS:
+        AddMsgAndPrint("\Could Not set scratchWorkspace!")
+        sys.exit()
+
     arcpy.env.scratchWorkspace = scratchWS
 
-    temp_dem =     os.path.join(scratchWS,r'temp_dem')
-    merged_dem =   os.path.join(scratchWS,r'Merged_DEM')
-    clu_buffer =   os.path.join(scratchWS,r'CLU_Buffer')
+    temp_dem = arcpy.CreateScratchName("temp_dem",data_type="RasterDataset",workspace=scratchWS)
+    merged_dem = arcpy.CreateScratchName("merged_dem",data_type="RasterDataset",workspace=scratchWS)
+    clu_buffer = arcpy.CreateScratchName("clu_buffer",data_type="FeatureClass",workspace=scratchWS)
 
     # Dictionary for code values returned by the getRasterProperties tool (keys)
     # Values represent the pixel_type inputs for the mosaic to new raster tool
@@ -332,7 +330,7 @@ try:
             sys.exit()
 
         # Check for consistent bit depth
-        cellValueCode =  int(arcpy.GetRasterProperties_management(inputDEM,"VALUETYPE").getOutput(0))  # This is the 'VALUETYPE' code returned by the getRasterProperty tool
+        cellValueCode =  int(arcpy.GetRasterProperties_management(raster,"VALUETYPE").getOutput(0))  # This is the 'VALUETYPE' code returned by the getRasterProperty tool
         bitDepth = pixelTypeDict[cellValueCode]  # Convert the code to pixel depth using dictionary
 
         if pixelType == "":
@@ -376,7 +374,7 @@ try:
             extractedDEM = arcpy.sa.ExtractByMask(current_dem, clu_buffer)
             extractedDEM.save(out_clip)
         except:
-            arcpy.AddError("\n The input CLU fields may not cover the input DEM files. Clip & Merge failed...Exiting!\n")
+            arcpy.AddError("\nThe input CLU fields may not cover the input DEM files. Clip & Merge failed...Exiting!\n")
             sys.exit()
 
         # Create merge statement
@@ -417,4 +415,4 @@ try:
     arcpy.AddMessage("Done!\n")
 
 except:
-    pass
+    errorMsg()
