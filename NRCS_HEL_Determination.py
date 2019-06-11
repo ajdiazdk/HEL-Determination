@@ -2,7 +2,9 @@
 # Name:   HEL Determination by AOI
 #
 # Author: Adolfo.Diaz
-#         Region 10 GIS Specialist
+#         GIS Specialist
+#         National Soil Survey Center
+#         USDA - NRCS
 # e-mail: adolfo.diaz@usda.gov
 # phone: 608.662.4422 ext. 216
 
@@ -645,13 +647,12 @@ def extractDEMfromImageService(demSource,zUnits):
     except:
         errorMsg()
 
-
 ## ================================================================================================================
 def extractDEM(inputDEM,zUnits):
     # This function will return a DEM that has the same extent as the CLU selected fields
     # buffered to 410 Meters.  The DEM can be a local raster layer or a web image server. Datum
     # must be in WGS84 or NAD83 and linear units must be in Meters or Feet otherwise it
-    # will exit.  If the cell size is not equivalent to 3M then the DEM will be resampled.
+    # will exit.  If the cell size is finer than 3M then the DEM will be resampled.
     # The resampling will happen using the Project Raster tool regardless of an actual
     # coordinate system change.  If the cell size is 3M then the DEM will be clipped using
     # the buffered CLU.  Environmental settings are used to control the output coordinate system.
@@ -1258,10 +1259,12 @@ if __name__ == '__main__':
         # define and set the scratch workspace
         scratchWS = os.path.dirname(sys.argv[0]) + os.sep + r'scratch.gdb'
         if not arcpy.Exists(scratchWS):
-           scratchWS = setScratchWorkspace()
+            scratchWS = setScratchWorkspace()
+        else:
+            AddMsgAndPrint("\nScratch workspace set to " + scratchWS)
 
         if not scratchWS:
-            AddMsgAndPrint("\Could Not set scratchWorkspace!")
+            AddMsgAndPrint("\nCould Not set scratchWorkspace!")
             sys.exit()
 
         arcpy.env.scratchWorkspace = scratchWS
@@ -1351,7 +1354,7 @@ if __name__ == '__main__':
         # Test intersection --- Should we check the percentage of intersection here? what if only 50% overlap
         totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(cluHELintersect, ("SHAPE@AREA"))]) / acreConversionDict.get(arcpy.Describe(cluHELintersect).SpatialReference.LinearUnitName)
         if not totalIntAcres:
-            AddMsgAndPrint("\tThere is no overlap between AOI and CLU Layer. EXITTING!",2)
+            AddMsgAndPrint("\tThere is no overlap between hel layer and CLU Layer. EXITTING!",2)
             removeScratchLayers()
             sys.exit()
 
@@ -1622,7 +1625,6 @@ if __name__ == '__main__':
                 populateForm()
             sys.exit()
 
-
         ### ---------------------------------------------------------------------------------------------- Check and create DEM clip from buffered CLU
         zFactor,demExtract = extractDEM(inputDEM,zUnits)
         if not zFactor or not demExtract:
@@ -1867,7 +1869,7 @@ if __name__ == '__main__':
 
         # Delete unwanted fields from the finalHELSummary Layer
         newFields.remove("VALUE_2")
-        validFlds = [cluNumberFld,"STATECD","TRACTNBR","FARMNBR","COUNTYCD","CALCACRES",helFld,"MUSYM"] + newFields  #------- Add musym and muname to this
+        validFlds = [cluNumberFld,"STATECD","TRACTNBR","FARMNBR","COUNTYCD","CALCACRES",helFld,"MUSYM","MUWATHEL","MUWNDHEL"] + newFields  #------- Add musym and muname to this
 
         deleteFlds = list()
         for fld in [f.name for f in arcpy.ListFields(finalHELSummary)]:
@@ -1978,7 +1980,8 @@ if __name__ == '__main__':
         removeScratchLayers()
         arcpy.SetProgressorLabel("")
         AddMsgAndPrint("\n")
+        arcpy.RefreshCatalog(scratchWS)
 
     except:
-        #removeScratchLayers()
+        removeScratchLayers()
         errorMsg()

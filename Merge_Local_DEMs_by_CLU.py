@@ -2,19 +2,16 @@
 # Name:   Merge Local DEMs by CLU
 #
 # Author(s): Chris.Morse
-#            State GIS Specialist
+#            IN State GIS Specialist
 # e-mail:    chris.morse@usda.gov
 # phone:     317.295.5849
 
 #            Adolfo.Diaz
-#            Region 10 GIS Specialist
+#            GIS Specialist
+#            National Soil Survey Center
+#            USDA - NRCS
 # e-mail:    adolfo.diaz@usda.gov
 # phone:     608.662.4422 ext. 216
-
-# Contributor: Kevin Godsey
-#              Soil Scientist
-# e-mail:      kevin.godsey@usda.gov
-# phone:       608.662.4422 ext. 190
 
 # Contributor: Christiane Roy
 #              MN Area GIS Specialist
@@ -286,10 +283,22 @@ try:
         sys.exit()
 
     arcpy.env.scratchWorkspace = scratchWS
+    arcpy.env.workspace = scratchWS
 
     temp_dem = arcpy.CreateScratchName("temp_dem",data_type="RasterDataset",workspace=scratchWS)
     merged_dem = arcpy.CreateScratchName("merged_dem",data_type="RasterDataset",workspace=scratchWS)
-    clu_buffer = arcpy.CreateScratchName("clu_buffer",data_type="FeatureClass",workspace=scratchWS)
+    clu_selected = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("clu_selected",data_type="FeatureClass",workspace=scratchWS))
+    clu_buffer = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("clu_buffer",data_type="FeatureClass",workspace=scratchWS))
+
+    # Make sure CLU fields are selected
+    cluDesc = arcpy.Describe(source_clu)
+    if cluDesc.FIDset == '':
+        AddMsgAndPrint("\nPlease select fields from the CLU Layer. Exiting!",2)
+        sys.exit()
+    else:
+        source_clu = arcpy.CopyFeatures_management(source_clu,clu_selected)
+
+    AddMsgAndPrint("\nNumber of CLU fields selected: {}".format(len(cluDesc.FIDset.split(";"))))
 
     # Dictionary for code values returned by the getRasterProperties tool (keys)
     # Values represent the pixel_type inputs for the mosaic to new raster tool
@@ -301,6 +310,7 @@ try:
     pixelType = ""
 
     # --------------------------------------------------------------------------------------- Evaluate every input raster to be merged
+    AddMsgAndPrint("\nChecking " + str(datasets) + " input raster layers")
     while x < datasets:
         raster = source_dems[x].replace("'", "")
         desc = arcpy.Describe(raster)
@@ -354,23 +364,26 @@ try:
         x += 1
 
     # --------------------------------------------------------------------------------------------------------- Buffer the selected CLUs by 400m
-    arcpy.AddMessage("\nBuffering input CLU fields...")
+    arcpy.AddMessage("\nBuffering input CLU fields")
     # Use 410 meter radius so that you have a bit of extra area for the HEL Determination tool to clip against
     # This distance is designed to minimize problems of no data crashes if the HEL Determiation tool's resampled 3-meter DEM doesn't perfectly snap with results from this tool.
     arcpy.Buffer_analysis(source_clu, clu_buffer, "410 Meters", "FULL", "", "ALL", "")
-    arcpy.AddMessage("Done!\n")
 
     # --------------------------------------------------------------------------------------------------------- Clip out the DEMs that were entered
-    arcpy.AddMessage("\nClipping inputs...")
+    arcpy.AddMessage("\nClipping Raster Layers...")
     x = 0
     del_list = [] # Start an empty list that will be used to clean up the temporary clips after merge is done
     mergeRasters = ""
+
 
     while x < datasets:
         current_dem = source_dems[x].replace("'", "")
         out_clip = temp_dem + "_" + str(x)
 
+        arcpy.SetProgressorLabel("Clipping " + current_dem + " " + str(x+1) + " of " + str(datasets))
+
         try:
+            AddMsgAndPrint("\tClipping " + current_dem + " " + str(x+1) + " of " + str(datasets))
             extractedDEM = arcpy.sa.ExtractByMask(current_dem, clu_buffer)
             extractedDEM.save(out_clip)
         except:
@@ -383,13 +396,11 @@ try:
             mergeRasters = "" + str(out_clip) + ""
         else:
             # Append to list
-            mergeRasters = merge_list + ";" + str(out_clip)
+            mergeRasters = mergeRasters + ";" + str(out_clip)
 
         # Append name of temporary output to the list of temp soil layers to be deleted
         del_list.append(str(out_clip))
         x += 1
-
-    arcpy.AddMessage("Done!\n")
 
     # --------------------------------------------------------------------------------------------------------- Merge Clipped Datasets
     arcpy.AddMessage("\nMerging inputs...")
@@ -398,21 +409,17 @@ try:
         arcpy.Delete_management(merged_dem)
 
     cellsize = 3
-    arcpy.MosaicToNewRaster_management(merge_list, out_dem_path, scratchWS, "#", pixelType, cellsize, numOfBands, "MEAN", "#")
-    arcpy.AddMessage("Done!\n")
+    arcpy.MosaicToNewRaster_management(mergeRasters, scratchWS, os.path.basename(merged_dem), "#", pixelType, cellsize, numOfBands, "MEAN", "#")
 
     # Clean-up
-    # Delete temporary soils
-    arcpy.AddMessage("\nCleaning up...")
+    #arcpy.AddMessage("\nCleaning up...")
     for lyr in del_list:
         arcpy.Delete_management(lyr)
     arcpy.Delete_management(clu_buffer)
-    arcpy.AddMessage("Done!\n")
 
     # Add resulting data to map
-    arcpy.AddMessage("\nAdding " + os.path.basename(temp_dem) + " to ArcMap session")
+    arcpy.AddMessage("\nAdding " + os.path.basename(merged_dem) + " to ArcMap session\n")
     arcpy.SetParameterAsText(2, merged_dem)
-    arcpy.AddMessage("Done!\n")
 
 except:
     errorMsg()
