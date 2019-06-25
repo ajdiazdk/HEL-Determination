@@ -619,16 +619,16 @@ def extractDEMfromImageService(demSource,zUnits):
         demClip = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("demClipIS",data_type="RasterDataset",workspace=scratchWS))
         arcpy.Clip_management(demSource, clipExtent, demClip, "", "", "", "NO_MAINTAIN_EXTENT")
 
-        #demExtract = arcpy.CreateScratchName("demClipIS",data_type="RasterDataset",workspace=scratchWS)
-        demExtract = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("demClipIS",data_type="RasterDataset",workspace=scratchWS))
+        demProject = arcpy.CreateScratchName("demClipIS",data_type="RasterDataset",workspace=scratchWS)
+        #demProject = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("demProjectIS",data_type="RasterDataset",workspace=scratchWS))
 
         outputCS = arcpy.Describe(cluLayer).SpatialReference
-        arcpy.ProjectRaster_management(demClip, demExtract, outputCS, "BILINEAR", outputCellsize)
+        arcpy.ProjectRaster_management(demClip, demProject, outputCS, "BILINEAR", outputCellsize)
 
         arcpy.Delete_management(demClip)
 
         # ------------------------------------------------------------------------------------ Report new DEM properties
-        desc = arcpy.Describe(demExtract)
+        desc = arcpy.Describe(demProject)
         newSR = desc.SpatialReference
         newLinearUnits = newSR.LinearUnitName
         newCellSize = desc.MeanCellWidth
@@ -642,7 +642,7 @@ def extractDEMfromImageService(demSource,zUnits):
         AddMsgAndPrint("\t\tZ-Factor: " + str(newZfactor))
 
         #AddMsgAndPrint(toc(startTime))
-        return newZfactor,demExtract
+        return newZfactor,demProject
 
     except:
         errorMsg()
@@ -1134,9 +1134,12 @@ def AddLayersToArcMap():
         helLyr = arcpy.mapping.ListLayers(mxd, arcpy.Describe(helLayer).nameString, df)[0]
         helLyr.visible = False
 
-        # set dataframe extent to the extent of the Field Determintation layer
-        fdLayer = arcpy.mapping.ListLayers(mxd, addToArcMap[2][1], df)[0]
-        df.extent = fdLayer.getSelectedExtent()
+        # set dataframe extent to the extent of the Field Determintation layer buffered by 50 meters.
+        fieldDeterminationBuffer = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("fdBuffer",data_type="FeatureClass",workspace=scratchWS))
+        arcpy.Buffer_analysis(fieldDetermination, fieldDeterminationBuffer, "50 Meters", "FULL", "", "ALL", "")
+        # fdLayer = arcpy.mapping.ListLayers(mxd, "Field Determination", df)[0]
+        df.extent = arcpy.Describe(fieldDeterminationBuffer).extent
+        arcpy.Delete_management(fieldDeterminationBuffer)
 
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
@@ -1260,8 +1263,8 @@ if __name__ == '__main__':
         scratchWS = os.path.dirname(sys.argv[0]) + os.sep + r'scratch.gdb'
         if not arcpy.Exists(scratchWS):
             scratchWS = setScratchWorkspace()
-        else:
-            AddMsgAndPrint("\nScratch workspace set to " + scratchWS)
+        #else:
+            #AddMsgAndPrint("\nScratch workspace set to " + scratchWS)
 
         if not scratchWS:
             AddMsgAndPrint("\nCould Not set scratchWorkspace!")
@@ -1341,7 +1344,6 @@ if __name__ == '__main__':
         AddMsgAndPrint("\nComputing summary of original HEL Values")
         arcpy.SetProgressorLabel("Computing summary of original HEL Values")
         cluHELintersect_pre = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("cluHELintersect_pre",data_type="FeatureClass",workspace=scratchWS))
-        #cluHELintersect = arcpy.CreateScratchName("FinalHELSummary",data_type="FeatureClass",workspace=scratchWS)
 
         # Use the catalog path of the hel layer to avoid using a selection
         helLayerPath = arcpy.Describe(helLayer).catalogPath
@@ -1594,7 +1596,7 @@ if __name__ == '__main__':
 
             if bNoPHELvalues:
                AddMsgAndPrint("\n\tThere are no PHEL values in HEL layer",1)
-               AddMsgAndPrint("\tNo Geoprocessing is required.\n")
+               AddMsgAndPrint("\tNo Geoprocessing is required.")
             if bSkipGeoprocessing:
                AddMsgAndPrint("\n\tHEL values are >= 33.33% or NHEL values > 66.66%",1)
                AddMsgAndPrint("\tNo Geoprocessing is required.\n")
@@ -1626,17 +1628,17 @@ if __name__ == '__main__':
             sys.exit()
 
         ### ---------------------------------------------------------------------------------------------- Check and create DEM clip from buffered CLU
-        zFactor,demExtract = extractDEM(inputDEM,zUnits)
-        if not zFactor or not demExtract:
+        zFactor,dem = extractDEM(inputDEM,zUnits)
+        if not zFactor or not dem:
            removeScratchLayers()
            sys.exit()
-        scratchLayers.append(demExtract)
+        scratchLayers.append(dem)
 
         ### -------------------------------------------------------------------------------------------------------------------------- Create Slope Layer
         arcpy.SetProgressorLabel("Creating Slope Derivative")
         AddMsgAndPrint("\nCreating Slope Derivative")
         #preslope = arcpy.CreateScratchName("preslope",data_type="RasterDataset",workspace=scratchWS)
-        preslope = Slope(demExtract,"PERCENT_RISE",zFactor)
+        preslope = Slope(dem,"PERCENT_RISE",zFactor)
         #outSlope.save(preslope)
         scratchLayers.append(preslope)
 
@@ -1651,7 +1653,7 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Calculating Flow Direction")
         AddMsgAndPrint("Calculating Flow Direction")
         #flowDirection = arcpy.CreateScratchName("flowDirection",data_type="RasterDataset",workspace=scratchWS)
-        flowDirection = FlowDirection(demExtract, "FORCE")
+        flowDirection = FlowDirection(dem, "FORCE")
         #outFlowDirection.save(flowDirection)
         scratchLayers.append(flowDirection)
 
@@ -1732,13 +1734,21 @@ if __name__ == '__main__':
 
         ### ------------------------------------------------------------------------------------------------------------- Convert K,T & R Factor and HEL Value to Rasters
         AddMsgAndPrint("\nConverting Vector to Raster for Spatial Analysis Purpose")
-        cellSize = arcpy.Describe(demExtract).MeanCellWidth
+        cellSize = arcpy.Describe(dem).MeanCellWidth
 
         # All raster datasets will be created in memory
-        kFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS))
-        tFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS))
-        rFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS))
-        helValue = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS))
+        #kFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS))
+        #tFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS))
+        #rFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS))
+        #helValue = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS))
+        kFactor = "in_memory" + os.sep + "kFactor"
+        tFactor = "in_memory" + os.sep + "tFactor"
+        rFactor = "in_memory" + os.sep + "rFactor"
+        helValue = "in_memory" + os.sep + "helValue"
+##        kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
+##        tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
+##        rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
+##        helValue = arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS)
 
         arcpy.SetProgressorLabel("Converting K Factor field to a raster")
         AddMsgAndPrint("\tConverting K Factor field to a raster")
@@ -1755,6 +1765,7 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Converting HEL Value field to a raster")
         AddMsgAndPrint("\tConverting HEL Value field to a raster")
         arcpy.FeatureToRaster_conversion(helSummary,HELrasterCode,helValue,cellSize)
+
         scratchLayers.append((kFactor,tFactor,rFactor,helValue))
 
         ### ------------------------------------------------------------------------------------------------------------- Calculate EI Factor

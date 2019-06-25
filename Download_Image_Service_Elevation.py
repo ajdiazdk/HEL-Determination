@@ -277,10 +277,10 @@ try:
     source_Service = arcpy.GetParameterAsText(1)
 
     # Variables
-    WGS84_DEM =    os.path.join(os.path.dirname(sys.argv[0]), "Temp.gdb" + os.sep + "WGS84_DEM")
-    final_DEM =    os.path.join(os.path.dirname(sys.argv[0]), "Temp.gdb" + os.sep + "Downloaded_DEM")
-    clu_buffer =   os.path.join(os.path.dirname(sys.argv[0]), "Temp.gdb" + os.sep + "CLU_Buffer")
-    clu_buff_wgs = os.path.join(os.path.dirname(sys.argv[0]), "Temp.gdb" + os.sep + "CLU_Buffer_WGS")
+    WGS84_DEM =    os.path.join(os.path.dirname(sys.argv[0]), "scratch.gdb" + os.sep + "WGS84_DEM")
+    final_DEM =    os.path.join(os.path.dirname(sys.argv[0]), "scratch.gdb" + os.sep + "Downloaded_DEM")
+    clu_buffer =   os.path.join(os.path.dirname(sys.argv[0]), "scratch.gdb" + os.sep + "CLU_Buffer")
+    clu_buff_wgs = os.path.join(os.path.dirname(sys.argv[0]), "scratch.gdb" + os.sep + "CLU_Buffer_WGS")
 
     # Buffer the selected CLUs by 400m
     arcpy.AddMessage("\nBuffering input CLU fields...")
