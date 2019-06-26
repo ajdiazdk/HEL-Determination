@@ -7,7 +7,9 @@
 # phone:     317.295.5849
 
 #            Adolfo.Diaz
-#            Region 10 GIS Specialist
+#            GIS Specialist
+#            National Soil Survey Center
+#            USDA - NRCS
 # e-mail:    adolfo.diaz@usda.gov
 # phone:     608.662.4422 ext. 216
 
@@ -268,8 +270,8 @@ try:
         sys.exit()
 
     # Define and set the scratch workspace
-    scratchWS = setScratchWorkspace()
-    arcpy.env.scratchWorkspace = scratchWS
+    #scratchWS = setScratchWorkspace()
+    #arcpy.env.scratchWorkspace = scratchWS
 
     # Inputs
     arcpy.AddMessage("\nExaming inputs...")

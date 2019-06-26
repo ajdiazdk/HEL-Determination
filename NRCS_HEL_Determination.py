@@ -187,6 +187,20 @@
 # 22) Validation code was updated to autopopulate layers and fields based on the
 #     newly adopted naming convention of layers and field schema.
 
+# ==========================================================================================
+# Updated 6/26/2019
+# - When an elevation service was used the slope derivative was being derived incorrectly.
+#   It turns out that the environmental output coordinate system variable set to
+#   4326 (WGS84) in the extractDEMfromImageService function was overriding the output
+#   coordinate system in the project raster tool.  I didn't think this variable could
+#   override a specfied tool parameter.  I reintroduced this variable before the project
+#   raster tool and set it to the same as the output coordinate system used in the project
+#   raster tool.
+# - Code was added to set the dataframe extent to the field determination layer but buffered
+#   to 50 meters.  The buffer was introduced so that the dataframe extent wasn't too tight
+#   around the selected fields.  The dataframe extent was set to the selected fields so
+#   that the cartography looks better.
+
 #-------------------------------------------------------------------------------
 
 ## ===================================================================================
@@ -230,6 +244,7 @@ def errorMsg():
             AddMsgAndPrint("\n\n")
             pass
         else:
+            AddMsgAndPrint("\n\tNRCS HEL Tool Error: -------------------------",2)
             AddMsgAndPrint(theMsg,2)
 
     except:
@@ -619,10 +634,10 @@ def extractDEMfromImageService(demSource,zUnits):
         demClip = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("demClipIS",data_type="RasterDataset",workspace=scratchWS))
         arcpy.Clip_management(demSource, clipExtent, demClip, "", "", "", "NO_MAINTAIN_EXTENT")
 
-        demProject = arcpy.CreateScratchName("demClipIS",data_type="RasterDataset",workspace=scratchWS)
-        #demProject = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("demProjectIS",data_type="RasterDataset",workspace=scratchWS))
-
+        # Project DEM subset from WGS84 to CLU coord system
         outputCS = arcpy.Describe(cluLayer).SpatialReference
+        arcpy.env.outputCoordinateSystem = outputCS
+        demProject = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("demProjectIS",data_type="RasterDataset",workspace=scratchWS))
         arcpy.ProjectRaster_management(demClip, demProject, outputCS, "BILINEAR", outputCellsize)
 
         arcpy.Delete_management(demClip)
