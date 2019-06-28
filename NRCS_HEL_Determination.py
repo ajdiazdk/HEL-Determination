@@ -200,6 +200,10 @@
 #   to 50 meters.  The buffer was introduced so that the dataframe extent wasn't too tight
 #   around the selected fields.  The dataframe extent was set to the selected fields so
 #   that the cartography looks better.
+# - Altered the populateForm function so that all tables are populated regardless of whether
+#   Microsoft Access is found.  Microsoft Access is installed differently in the VDI
+#   environment so the tables never populated.  This way the user can manually open Access
+#   and continue with the workflow.
 
 #-------------------------------------------------------------------------------
 
@@ -828,108 +832,6 @@ def removeScratchLayers():
         pass
 
 ## ================================================================================================================
-def populateForm():
-    # This function will prepare the 1026 form by adding 16 fields to the
-    # fieldDetermination feauture class.  This function will still be invoked even if
-    # there was no geoprocessing executed due to no PHEL values to be computed.
-    # if bNoPHELvalues is true, 3 fields will be added that otherwise would've
-    # been added after HEL geoprocessing.  However, values to these fields will
-    # be populated from the ogCLUinfoDict and represent original HEL values
-    # primarily determined by the 33.33% or 50 acre rule
-
-    try:
-
-        AddMsgAndPrint("\nPreparing and Populating NRCS-CPA-026e Form", 0)
-
-        # Add 3 fields and populate them from ogCLUinfoDict
-        if bNoPHELvalues:
-
-            # Add the following fields to fieldDetermination
-            fieldList = ["HEL_Acres","HEL_Pct","HEL_YES"]
-            for field in fieldList:
-                if not FindField(fieldDetermination,field):
-                    if field == "HEL_YES":
-                        arcpy.AddField_management(fieldDetermination,field,"TEXT","","",5)
-                    else:
-                        arcpy.AddField_management(fieldDetermination,field,"FLOAT")
-            fieldList.append(cluNumberFld)
-
-            # ['HEL_Acres', 'HEL_Pct', 'HEL_YES', u'CLUNBR']
-            with arcpy.da.UpdateCursor(fieldDetermination,fieldList) as cursor:
-                for row in cursor:
-                    og_cluHELdetermination = ogCLUinfoDict.get(row[3])[0]
-                    og_cluHELacres = ogCLUinfoDict.get(row[3])[1]
-                    og_cluHELpct = ogCLUinfoDict.get(row[3])[2]
-
-                    if og_cluHELdetermination == "HEL":
-                        row[2] = "Yes"
-                    elif og_cluHELdetermination == "NHEL":
-                        row[2] = "No"
-                    else:
-                         row[2] = "NA"
-                         AddMsgAndPrint("\n\tError in populating 'HEL_YES' field",2)
-
-                    row[0] = og_cluHELacres
-                    row[1] = og_cluHELpct
-                    cursor.updateRow(row)
-            del cursor
-
-        # ---------------------------------------------------------------------  Collect Time information
-        today = datetime.date.today()
-        today = today.strftime('%b %d, %Y')
-
-        # ---------------------------------------------------------------------- Get State Abbreviation
-        stateCodeDict = {'WA': '53', 'DE': '10', 'DC': '11', 'WI': '55', 'WV': '54', 'HI': '15',
-                        'FL': '12', 'WY': '56', 'PR': '72', 'NJ': '34', 'NM': '35', 'TX': '48',
-                        'LA': '22', 'NC': '37', 'ND': '38', 'NE': '31', 'TN': '47', 'NY': '36',
-                        'PA': '42', 'AK': '02', 'NV': '32', 'NH': '33', 'VA': '51', 'CO': '08',
-                        'CA': '06', 'AL': '01', 'AR': '05', 'VT': '50', 'IL': '17', 'GA': '13',
-                        'IN': '18', 'IA': '19', 'MA': '25', 'AZ': '04', 'ID': '16', 'CT': '09',
-                        'ME': '23', 'MD': '24', 'OK': '40', 'OH': '39', 'UT': '49', 'MO': '29',
-                        'MN': '27', 'MI': '26', 'RI': '44', 'KS': '20', 'MT': '30', 'MS': '28',
-                        'SC': '45', 'KY': '21', 'OR': '41', 'SD': '46'}
-
-        # Try to get the state using the field determination layer
-        try:
-            stateCode = ([row[0] for row in arcpy.da.SearchCursor(fieldDetermination,"STATECD")])
-            state = [stAbbrev for (stAbbrev, code) in stateCodeDict.items() if code == stateCode[0]][0]
-        # Otherwise get the state from the computer user name
-        except:
-            state = getpass.getuser().replace('.',' ').replace('\'','')
-
-        # Add 18 Fields to the fieldDetermination feature class
-        fieldDict = {"Signature":("TEXT",dcSignature,50),"SoilAvailable":("TEXT","Yes",5),"Completion":("TEXT","Office",10),
-                        "SodbustField":("TEXT","No",5),"Delivery":("TEXT","Mail",10),"Remarks":("TEXT","",110),
-                        "RequestDate":("DATE",""),"LastName":("TEXT","",50),"FirstName":("TEXT","",25),"Address":("TEXT","",50),
-                        "City":("TEXT","",25),"ZipCode":("TEXT","",10),"Request_from":("TEXT","Landowner",15),"HELFarm":("TEXT","Yes",5),
-                        "Determination_Date":("DATE",today),"state":("TEXT",state,2),"SodbustTract":("TEXT","No",5),"Lidar":("TEXT","Yes",5)}
-
-        arcpy.SetProgressor("step", "Preparing and Populating 026 Form", 0, len(fieldDict), 1)
-
-        for field,params in fieldDict.iteritems():
-            arcpy.SetProgressorLabel("Adding Field: " + field + r' to "Field Determination" layer')
-            try:
-                fldLength = params[2]
-            except:
-                fldLength = 0
-                pass
-
-            arcpy.AddField_management(fieldDetermination,field,params[0],"#","#",fldLength)
-
-            if len(params[1]) > 0:
-                expression = "\"" + params[1] + "\""
-                arcpy.CalculateField_management(fieldDetermination,field,expression,"VB")
-
-        AddMsgAndPrint("\tOpening NRCS-CPA-026e Form",0)
-        subprocess.Popen([msAccessPath,helDatabase])
-
-        return True
-
-    except:
-        return False
-        errorMsg()
-
-## ================================================================================================================
 def AddLayersToArcMapOLD():
     # This Function will add necessary layers to ArcMap and prepare their
     # symbology.  The 1026 form will also be prepared.
@@ -1079,6 +981,69 @@ def AddLayersToArcMap():
     # to add layers to arcmap through the toolbox.
 
     try:
+        # ------------------------------------------------------------------------ Post Process layers
+        # Add 3 fields to the field determination layer and populate them
+        # from ogCLUinfoDict and 4 fields to the Final HEL Summary layer that
+        # otherwise would've been added after geoprocessing was successful.
+        if bNoPHELvalues or bSkipGeoprocessing:
+
+            # Add 3 fields to fieldDetermination layer
+            fieldList = ["HEL_YES","HEL_Acres","HEL_Pct"]
+            for field in fieldList:
+                if not FindField(fieldDetermination,field):
+                    if field == "HEL_YES":
+                        arcpy.AddField_management(fieldDetermination,field,"TEXT","","",5)
+                    else:
+                        arcpy.AddField_management(fieldDetermination,field,"FLOAT")
+            fieldList.append(cluNumberFld)
+
+            # Update new fields using ogCLUinfoDict
+            with arcpy.da.UpdateCursor(fieldDetermination,fieldList) as cursor:
+                 for row in cursor:
+                     row[0] = ogCLUinfoDict.get(row[3])[0]   # "HEL_YES" value
+                     row[1] = ogCLUinfoDict.get(row[3])[1]   # "HEL_Acres" value
+                     row[2] = ogCLUinfoDict.get(row[3])[2]   # "HEL_Pct" value
+                     cursor.updateRow(row)
+
+            # Add 4 fields to Final HEL Summary layer
+            newFields = ['Polygon_Acres','Final_HEL_Value','Final_HEL_Acres','Final_HEL_Percent']
+            for fld in newFields:
+                if not len(arcpy.ListFields(finalHELSummary,fld)) > 0:
+                   if fld == 'Final_HEL_Value':
+                      arcpy.AddField_management(finalHELSummary,'Final_HEL_Value',"TEXT","","",5)
+                   else:
+                        arcpy.AddField_management(finalHELSummary,fld,"DOUBLE")
+
+            newFields.append(helFld)
+            newFields.append(cluNumberFld)
+            newFields.append("SHAPE@AREA")
+
+            # [polyAcres,finalHELvalue,finalHELacres,finalHELpct,MUHELCL,'CLUNBR',"SHAPE@AREA"]
+            with arcpy.da.UpdateCursor(finalHELSummary,newFields) as cursor:
+                for row in cursor:
+
+                    # Calculate polygon acres;
+                    row[0] = row[6] / acreConversionDict.get(arcpy.Describe(finalHELSummary).SpatialReference.LinearUnitName)
+
+                    # Final_HEL_Value will be set to the initial HEL value
+                    row[1] = row[4]
+
+                    # set Final HEL Acres to 0 for PHEL and NHEL; othewise set to polyAcres
+                    if row[4] in ('NHEL','PHEL'):
+                        row[2] = 0.0
+                    else:
+                        row[2] = row[0]
+
+                    # Calculate percent of polygon relative to CLU
+                    cluAcres = ogCLUinfoDict.get(row[5])[1]
+                    pct = (row[0] / cluAcres) * 100
+                    if pct > 100.0: pct = 100.0
+                    row[3] = pct
+
+                    del cluAcres,pct
+                    cursor.updateRow(row)
+            del cursor
+
         # Put this section in a try-except. It will fail if run from ArcCatalog
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
@@ -1162,6 +1127,79 @@ def AddLayersToArcMap():
     except:
         errorMsg()
 
+## ================================================================================================================
+def populateForm():
+    # This function will prepare the 1026 form by adding 16 fields to the
+    # fieldDetermination feauture class.  This function will still be invoked even if
+    # there was no geoprocessing executed due to no PHEL values to be computed.
+    # if bNoPHELvalues is true, 3 fields will be added that otherwise would've
+    # been added after HEL geoprocessing.  However, values to these fields will
+    # be populated from the ogCLUinfoDict and represent original HEL values
+    # primarily determined by the 33.33% or 50 acre rule
+
+    try:
+
+        AddMsgAndPrint("\nPreparing and Populating NRCS-CPA-026e Form", 0)
+
+        # ---------------------------------------------------------------------  Collect Time information
+        today = datetime.date.today()
+        today = today.strftime('%b %d, %Y')
+
+        # ---------------------------------------------------------------------- Get State Abbreviation
+        stateCodeDict = {'WA': '53', 'DE': '10', 'DC': '11', 'WI': '55', 'WV': '54', 'HI': '15',
+                        'FL': '12', 'WY': '56', 'PR': '72', 'NJ': '34', 'NM': '35', 'TX': '48',
+                        'LA': '22', 'NC': '37', 'ND': '38', 'NE': '31', 'TN': '47', 'NY': '36',
+                        'PA': '42', 'AK': '02', 'NV': '32', 'NH': '33', 'VA': '51', 'CO': '08',
+                        'CA': '06', 'AL': '01', 'AR': '05', 'VT': '50', 'IL': '17', 'GA': '13',
+                        'IN': '18', 'IA': '19', 'MA': '25', 'AZ': '04', 'ID': '16', 'CT': '09',
+                        'ME': '23', 'MD': '24', 'OK': '40', 'OH': '39', 'UT': '49', 'MO': '29',
+                        'MN': '27', 'MI': '26', 'RI': '44', 'KS': '20', 'MT': '30', 'MS': '28',
+                        'SC': '45', 'KY': '21', 'OR': '41', 'SD': '46'}
+
+        # Try to get the state using the field determination layer
+        try:
+            stateCode = ([row[0] for row in arcpy.da.SearchCursor(fieldDetermination,"STATECD")])
+            state = [stAbbrev for (stAbbrev, code) in stateCodeDict.items() if code == stateCode[0]][0]
+        # Otherwise get the state from the computer user name
+        except:
+            state = getpass.getuser().replace('.',' ').replace('\'','')
+
+        # Add 18 Fields to the fieldDetermination feature class
+        fieldDict = {"Signature":("TEXT",dcSignature,50),"SoilAvailable":("TEXT","Yes",5),"Completion":("TEXT","Office",10),
+                        "SodbustField":("TEXT","No",5),"Delivery":("TEXT","Mail",10),"Remarks":("TEXT","",110),
+                        "RequestDate":("DATE",""),"LastName":("TEXT","",50),"FirstName":("TEXT","",25),"Address":("TEXT","",50),
+                        "City":("TEXT","",25),"ZipCode":("TEXT","",10),"Request_from":("TEXT","Landowner",15),"HELFarm":("TEXT","Yes",5),
+                        "Determination_Date":("DATE",today),"state":("TEXT",state,2),"SodbustTract":("TEXT","No",5),"Lidar":("TEXT","Yes",5)}
+
+        arcpy.SetProgressor("step", "Preparing and Populating NRCS-CPA-026e Form", 0, len(fieldDict), 1)
+
+        for field,params in fieldDict.iteritems():
+            arcpy.SetProgressorLabel("Adding Field: " + field + r' to "Field Determination" layer')
+            try:
+                fldLength = params[2]
+            except:
+                fldLength = 0
+                pass
+
+            arcpy.AddField_management(fieldDetermination,field,params[0],"#","#",fldLength)
+
+            if len(params[1]) > 0:
+                expression = "\"" + params[1] + "\""
+                arcpy.CalculateField_management(fieldDetermination,field,expression,"VB")
+
+        if bAccess:
+            AddMsgAndPrint("\tOpening NRCS-CPA-026e Form",0)
+            subprocess.Popen([msAccessPath,helDatabase])
+        else:
+            AddMsgAndPrint("\tCould not locate the Microsoft Access Software",1)
+            AddMsgAndPrint("\tOpen Microsoft Access manually to access the NRCS-CPA-026e Form",1)
+            arcpy.SetProgressorLabel("Could not locate the Microsoft Access Software")
+
+        return True
+
+    except:
+        return False
+        errorMsg()
 
 ## =========================================================== Main Body ========================================================
 import sys, string, os, traceback, re
@@ -1225,8 +1263,8 @@ if __name__ == '__main__':
         fieldDetermination = os.path.join(helDatabase, r'Field_Determination')
         helSummary = os.path.join(helDatabase, r'Initial_HEL_Summary')
         lidarHEL = os.path.join(helDatabase, r'LiDAR_HEL_Summary')
-        cluHELintersect = os.path.join(helDatabase, r'Final_HEL_Summary')
-        accessLayers = [fieldDetermination,helSummary,lidarHEL,cluHELintersect]
+        finalHELSummary = os.path.join(helDatabase, r'Final_HEL_Summary')
+        accessLayers = [fieldDetermination,helSummary,lidarHEL,finalHELSummary]
 
         for layer in accessLayers:
             if arcpy.Exists(layer):
@@ -1253,7 +1291,6 @@ if __name__ == '__main__':
 
         if bAccess and not os.path.isfile(msAccessPath):
             bAccess = False
-            AddMsgAndPrint("\nCould not locate Microsoft Access Software, will not populate 026 Form",2)
 
         ## ------------------------------------------------------------------------------------ Checkout Spatial Analyst Extension and set scratch workspace """
         # Check Availability of Spatial Analyst Extension
@@ -1355,7 +1392,7 @@ if __name__ == '__main__':
                        [39.3701,12,0.393701,1]]
 
         ### ------------------------------------------------------------------------------------------------------------- Compute Summary of original HEL values"""
-        # -------------------------------------------------------------------------- Intersect fieldDetermination (CLU & AOI) with soils (helLayer) -> cluHELintersect
+        # -------------------------------------------------------------------------- Intersect fieldDetermination (CLU & AOI) with soils (helLayer) -> finalHELSummary
         AddMsgAndPrint("\nComputing summary of original HEL Values")
         arcpy.SetProgressorLabel("Computing summary of original HEL Values")
         cluHELintersect_pre = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("cluHELintersect_pre",data_type="FeatureClass",workspace=scratchWS))
@@ -1365,11 +1402,11 @@ if __name__ == '__main__':
 
         # Intersect fieldDetermination with soils and explode into single part
         arcpy.Intersect_analysis([fieldDetermination,helLayerPath],cluHELintersect_pre,"ALL")
-        arcpy.MultipartToSinglepart_management(cluHELintersect_pre,cluHELintersect)
+        arcpy.MultipartToSinglepart_management(cluHELintersect_pre,finalHELSummary)
         scratchLayers.append(cluHELintersect_pre)
 
         # Test intersection --- Should we check the percentage of intersection here? what if only 50% overlap
-        totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(cluHELintersect, ("SHAPE@AREA"))]) / acreConversionDict.get(arcpy.Describe(cluHELintersect).SpatialReference.LinearUnitName)
+        totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(finalHELSummary, ("SHAPE@AREA"))]) / acreConversionDict.get(arcpy.Describe(finalHELSummary).SpatialReference.LinearUnitName)
         if not totalIntAcres:
             AddMsgAndPrint("\tThere is no overlap between hel layer and CLU Layer. EXITTING!",2)
             removeScratchLayers()
@@ -1379,8 +1416,8 @@ if __name__ == '__main__':
         cluNumberFld = "CLUNBR"
         dissovleFlds = [cluNumberFld,"TRACTNBR","FARMNBR","COUNTYCD","CALCACRES",helFld]
 
-        # Dissolve the cluHELintersect to report input summary
-        arcpy.Dissolve_management(cluHELintersect, helSummary, dissovleFlds, "","MULTI_PART", "DISSOLVE_LINES")
+        # Dissolve the finalHELSummary to report input summary
+        arcpy.Dissolve_management(finalHELSummary, helSummary, dissovleFlds, "","MULTI_PART", "DISSOLVE_LINES")
 
         # --------------------------------------------------------------------------- Add and Update fields in the HEL Summary Layer (Og_HELcode, Og_HEL_Acres, Og_HEL_AcrePct)
         # Add 3 fields to the intersected layer.  The intersected 'clueHELintersect' layer will
@@ -1494,7 +1531,7 @@ if __name__ == '__main__':
         # {cluNumber:(HEL value, cluAcres, HEL Pct} -- HEL value is determined by the 33.33% or 50 acre rule
         ogCLUinfoDict = dict()
 
-        # Iterate through the pivot table and report HEL values by CLU
+        # Iterate through the pivot table and report HEL values by CLU - ['CLUNBR','HEL','NHEL','PHEL']
         with arcpy.da.SearchCursor(ogHelSummaryStatsPivot,pivotFields) as cursor:
             for row in cursor:
 
@@ -1616,30 +1653,15 @@ if __name__ == '__main__':
                AddMsgAndPrint("\n\tHEL values are >= 33.33% or NHEL values > 66.66%",1)
                AddMsgAndPrint("\tNo Geoprocessing is required.\n")
 
-            # Add fields to fieldDetermination layer that otherwise would've been added
-            # after geoprocessing was successful
-            fieldList = ["HEL_YES","HEL_Acres","HEL_Pct"]
-            for field in fieldList:
-                if not FindField(fieldDetermination,field):
-                    if field == "HEL_YES":
-                        arcpy.AddField_management(fieldDetermination,field,"TEXT","","",5)
-                    else:
-                        arcpy.AddField_management(fieldDetermination,field,"FLOAT")
-            fieldList.append(cluNumberFld)
-
-            # Update new fields using ogCLUinfoDict
-            with arcpy.da.UpdateCursor(fieldDetermination,fieldList) as cursor:
-                 for row in cursor:
-                     row[0] = ogCLUinfoDict.get(row[3])[0]   # "HEL_YES" value
-                     row[1] = ogCLUinfoDict.get(row[3])[1]   # "HEL_Acres" value
-                     row[2] = ogCLUinfoDict.get(row[3])[2]   # "HEL_Pct" value
-                     cursor.updateRow(row)
-            del cursor
-
             AddLayersToArcMap()
 
-            if bAccess:
-                populateForm()
+            if not populateForm():
+                AddMsgAndPrint("\nFailed to correclty populate NRCS-CPA-026e form",2)
+
+            # Clean up time
+            arcpy.SetProgressorLabel("")
+            AddMsgAndPrint("\n")
+            arcpy.RefreshCatalog(scratchWS)
             sys.exit()
 
         ### ---------------------------------------------------------------------------------------------- Check and create DEM clip from buffered CLU
@@ -1752,10 +1774,6 @@ if __name__ == '__main__':
         cellSize = arcpy.Describe(dem).MeanCellWidth
 
         # All raster datasets will be created in memory
-        #kFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS))
-        #tFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS))
-        #rFactor = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS))
-        #helValue = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS))
         kFactor = "in_memory" + os.sep + "kFactor"
         tFactor = "in_memory" + os.sep + "tFactor"
         rFactor = "in_memory" + os.sep + "rFactor"
@@ -1767,15 +1785,15 @@ if __name__ == '__main__':
 
         arcpy.SetProgressorLabel("Converting K Factor field to a raster")
         AddMsgAndPrint("\tConverting K Factor field to a raster")
-        arcpy.FeatureToRaster_conversion(cluHELintersect,kFactorFld,kFactor,cellSize)
+        arcpy.FeatureToRaster_conversion(finalHELSummary,kFactorFld,kFactor,cellSize)
 
         arcpy.SetProgressorLabel("Converting T Factor field to a raster")
         AddMsgAndPrint("\tConverting T Factor field to a raster")
-        arcpy.FeatureToRaster_conversion(cluHELintersect,tFactorFld,tFactor,cellSize)
+        arcpy.FeatureToRaster_conversion(finalHELSummary,tFactorFld,tFactor,cellSize)
 
         arcpy.SetProgressorLabel("Converting R Factor field to a raster")
         AddMsgAndPrint("\tConverting R Factor field to a raster")
-        arcpy.FeatureToRaster_conversion(cluHELintersect,rFactorFld,rFactor,cellSize)
+        arcpy.FeatureToRaster_conversion(finalHELSummary,rFactorFld,rFactor,cellSize)
 
         arcpy.SetProgressorLabel("Converting HEL Value field to a raster")
         AddMsgAndPrint("\tConverting HEL Value field to a raster")
@@ -1819,9 +1837,6 @@ if __name__ == '__main__':
         arcpy.SetProgressorLabel("Computing summary of Final HEL Values:")
         AddMsgAndPrint("\nComputing summary of Final HEL Values:\n")
 
-        # This is to minimize confusion
-        finalHELSummary = cluHELintersect
-
         # Summarize new values between HEL soil polygon and lidarHEL raster
         outPolyTabulate = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("HEL_Polygon_Tabulate",data_type="ArcInfoTable",workspace=scratchWS))
         #outPolyTabulate = arcpy.CreateScratchName("HEL_Polygon_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
@@ -1854,7 +1869,7 @@ if __name__ == '__main__':
             AddMsgAndPrint("\n\tReclassifying helFactor Failed",2)
             sys.exit()
 
-        # Add 4 fields to the intersected layer.
+        # Add 4 fields to Final HEL Summary layer
         newFields = ['Polygon_Acres','Final_HEL_Value','Final_HEL_Acres','Final_HEL_Percent']
 
         for fld in newFields:
@@ -1886,6 +1901,9 @@ if __name__ == '__main__':
                 # Calculate percentage of the polygon that is HEL
                 row[3] = (row[2] / row[0]) * 100
 
+                # set pct to 100 if its greater; rounding issue
+                if row[3] > 100.0: row[3] = 100.0
+
                 # Determine polygon HEL Value using 50% threshold
                 if row[3] > 50.0:
                     row[1] = "HEL"
@@ -1895,7 +1913,7 @@ if __name__ == '__main__':
 
         # Delete unwanted fields from the finalHELSummary Layer
         newFields.remove("VALUE_2")
-        validFlds = [cluNumberFld,"STATECD","TRACTNBR","FARMNBR","COUNTYCD","CALCACRES",helFld,"MUSYM","MUWATHEL","MUWNDHEL"] + newFields  #------- Add musym and muname to this
+        validFlds = [cluNumberFld,"STATECD","TRACTNBR","FARMNBR","COUNTYCD","CALCACRES",helFld,"MUSYM","MUNAME","MUWATHEL","MUWNDHEL"] + newFields
 
         deleteFlds = list()
         for fld in [f.name for f in arcpy.ListFields(finalHELSummary)]:
@@ -1999,11 +2017,11 @@ if __name__ == '__main__':
         """----------------------------------------------------------------------------------------------------- Prepare Symboloby for ArcMap and 1026 form"""
         AddLayersToArcMap()
 
-        if bAccess:
-            if not populateForm():
-               AddMsgAndPrint("\nFailure to correclty populate 1026 form",2)
+        if not populateForm():
+            AddMsgAndPrint("\nFailed to correclty populate NRCS-CPA-026e form",2)
 
-        removeScratchLayers()
+        # Clean up time
+        #removeScratchLayers()
         arcpy.SetProgressorLabel("")
         AddMsgAndPrint("\n")
         arcpy.RefreshCatalog(scratchWS)
