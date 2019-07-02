@@ -205,6 +205,12 @@
 #   environment so the tables never populated.  This way the user can manually open Access
 #   and continue with the workflow.
 
+# ==========================================================================================
+# Updated 7/1/2019
+# - To minimize confusion, Final HEL Values was switched to LiDAR HEL values; The confusion
+#    when there are NHEL pixels that are summarized from the geoprocessing, the user expects
+#    to see NHEL polygons.  However, the polygons are assessed differently.
+
 #-------------------------------------------------------------------------------
 
 ## ===================================================================================
@@ -1774,14 +1780,10 @@ if __name__ == '__main__':
         cellSize = arcpy.Describe(dem).MeanCellWidth
 
         # All raster datasets will be created in memory
-        kFactor = "in_memory" + os.sep + "kFactor"
-        tFactor = "in_memory" + os.sep + "tFactor"
-        rFactor = "in_memory" + os.sep + "rFactor"
-        helValue = "in_memory" + os.sep + "helValue"
-##        kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
-##        tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
-##        rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
-##        helValue = arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS)
+        kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
+        tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
+        rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
+        helValue = arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS)
 
         arcpy.SetProgressorLabel("Converting K Factor field to a raster")
         AddMsgAndPrint("\tConverting K Factor field to a raster")
@@ -1834,8 +1836,8 @@ if __name__ == '__main__':
         arcpy.Reclassify_3d(helFactor, "VALUE", remapString, lidarHEL,'NODATA')
 
         ### ------------------------------------------------------------------------------------- Determine if individual PHEL delineations are HEL/NHEL"""
-        arcpy.SetProgressorLabel("Computing summary of Final HEL Values:")
-        AddMsgAndPrint("\nComputing summary of Final HEL Values:\n")
+        arcpy.SetProgressorLabel("Computing summary of LiDAR HEL Values:")
+        AddMsgAndPrint("\nComputing summary of LiDAR HEL Values:\n")
 
         # Summarize new values between HEL soil polygon and lidarHEL raster
         outPolyTabulate = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("HEL_Polygon_Tabulate",data_type="ArcInfoTable",workspace=scratchWS))
@@ -1856,14 +1858,14 @@ if __name__ == '__main__':
             if not "VALUE_1" in tabulateFields:
                 AddMsgAndPrint("\tWARNING: Entire Area is HEL",1)
                 arcpy.AddField_management(outPolyTabulate,"VALUE_1","DOUBLE")
-                arcpy.CalculateField_management(outTabulate,"VALUE_1",0)
+                arcpy.CalculateField_management(outPolyTabulate,"VALUE_1",0)
                 bOnlyHEL = True
 
             # HEL is not Present - All is NHEL; All is VALUE1
             if not "VALUE_2" in tabulateFields:
                 AddMsgAndPrint("\tWARNING: Entire Area is NHEL",1)
                 arcpy.AddField_management(outPolyTabulate,"VALUE_2","DOUBLE")
-                arcpy.CalculateField_management(outTabulate,"VALUE_2",0)
+                arcpy.CalculateField_management(outPolyTabulate,"VALUE_2",0)
                 bOnlyNHEL = True
         else:
             AddMsgAndPrint("\n\tReclassifying helFactor Failed",2)
