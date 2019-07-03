@@ -207,9 +207,22 @@
 
 # ==========================================================================================
 # Updated 7/1/2019
-# - To minimize confusion, Final HEL Values was switched to LiDAR HEL values; The confusion
-#    when there are NHEL pixels that are summarized from the geoprocessing, the user expects
-#    to see NHEL polygons.  However, the polygons are assessed differently.
+# - To minimize confusion, 'Final HEL Values' was switched to LiDAR HEL values; The confusion
+#   when there are NHEL pixels that are summarized from the geoprocessing, the user expects
+#   to see NHEL polygons.  However, the polygons are assessed differently.
+# - "RuntimeError: Too few parameters. Expected 1" error message was encountered when
+#   determining if individual PHEL delineations are HEL or NHEL.  Specifically, the error
+#   was during an updateCursor to the finalHELSummary layer when there was no HEL values
+#   present.  "Value_2" was added to the outPolyTabulate table but it wasn't being recognized.
+#   It turns out it is an access datbase issue related to adding field names:
+#   https://support.esri.com/en/technical-article/000006080
+#   To circumvent this issue the finalHELSummary layer and the outPolyTabulate table
+#   are first joined and then if HEL values (VALUE_2) is not present then its added to
+#   the finalHELSumary layer.
+# - There was an error when an image service was used AND z-units left blank.  Normally
+#   the z-units, if left blank, are set to the same as linear units but most image
+#   services' linear units are set to degrees, which isn't a valid z-unit.  A check was put
+#   in place.  the Z-units are set to the projected dem linear units.
 
 #-------------------------------------------------------------------------------
 
@@ -657,6 +670,9 @@ def extractDEMfromImageService(demSource,zUnits):
         newSR = desc.SpatialReference
         newLinearUnits = newSR.LinearUnitName
         newCellSize = desc.MeanCellWidth
+
+        # if zUnits not populated assume it is the same as linearUnits
+        if not zUnits: zUnits = newLinearUnits
 
         newZfactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(newLinearUnits)]
 
@@ -1780,10 +1796,15 @@ if __name__ == '__main__':
         cellSize = arcpy.Describe(dem).MeanCellWidth
 
         # All raster datasets will be created in memory
-        kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
-        tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
-        rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
-        helValue = arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS)
+        kFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS))
+        tFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS))
+        rFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS))
+        helValue = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS))
+
+        #kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
+        #tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
+        #rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
+        #helValue = arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS)
 
         arcpy.SetProgressorLabel("Converting K Factor field to a raster")
         AddMsgAndPrint("\tConverting K Factor field to a raster")
@@ -1848,29 +1869,6 @@ if __name__ == '__main__':
         tabulateFields = [fld.name for fld in arcpy.ListFields(outPolyTabulate)][2:]
         scratchLayers.append(outPolyTabulate)
 
-        # Booleans to indicate if only HEL or only NHEL is present
-        bOnlyHEL = False; bOnlyNHEL = False
-
-        # Check if VALUE_1 or VALUE_2 are missing from outPolyTabulate table
-        if len(tabulateFields):
-
-            # NHEL is not Present - All is HEL; All is VALUE2
-            if not "VALUE_1" in tabulateFields:
-                AddMsgAndPrint("\tWARNING: Entire Area is HEL",1)
-                arcpy.AddField_management(outPolyTabulate,"VALUE_1","DOUBLE")
-                arcpy.CalculateField_management(outPolyTabulate,"VALUE_1",0)
-                bOnlyHEL = True
-
-            # HEL is not Present - All is NHEL; All is VALUE1
-            if not "VALUE_2" in tabulateFields:
-                AddMsgAndPrint("\tWARNING: Entire Area is NHEL",1)
-                arcpy.AddField_management(outPolyTabulate,"VALUE_2","DOUBLE")
-                arcpy.CalculateField_management(outPolyTabulate,"VALUE_2",0)
-                bOnlyNHEL = True
-        else:
-            AddMsgAndPrint("\n\tReclassifying helFactor Failed",2)
-            sys.exit()
-
         # Add 4 fields to Final HEL Summary layer
         newFields = ['Polygon_Acres','Final_HEL_Value','Final_HEL_Acres','Final_HEL_Percent']
 
@@ -1882,6 +1880,31 @@ if __name__ == '__main__':
                     arcpy.AddField_management(finalHELSummary,fld,"DOUBLE")
 
         arcpy.JoinField_management(finalHELSummary,zoneFld,outPolyTabulate,zoneFld + "_1",tabulateFields)
+
+        # Booleans to indicate if only HEL or only NHEL is present
+        bOnlyHEL = False; bOnlyNHEL = False
+
+        # Check if VALUE_1 or VALUE_2 are missing from outPolyTabulate table
+        finalHELSummaryFlds = [fld.name for fld in arcpy.ListFields(finalHELSummary)][2:]
+        if len(finalHELSummaryFlds):
+
+            # NHEL is not Present - All is HEL; All is VALUE2
+            if not "VALUE_1" in tabulateFields:
+                AddMsgAndPrint("\tWARNING: Entire Area is HEL",1)
+                arcpy.AddField_management(finalHELSummary,"VALUE_1","DOUBLE")
+                arcpy.CalculateField_management(finalHELSummary,"VALUE_1",0)
+                bOnlyHEL = True
+
+            # HEL is not Present - All is NHEL; All is VALUE1
+            if not "VALUE_2" in tabulateFields:
+                AddMsgAndPrint("\tWARNING: Entire Area is NHEL",1)
+                arcpy.AddField_management(finalHELSummary,"VALUE_2","DOUBLE")
+                arcpy.CalculateField_management(finalHELSummary,"VALUE_2",0)
+                bOnlyNHEL = True
+        else:
+            AddMsgAndPrint("\n\tReclassifying helFactor Failed",2)
+            sys.exit()
+
         newFields.append("VALUE_2")
         newFields.append("SHAPE@AREA")
 
@@ -1924,7 +1947,7 @@ if __name__ == '__main__':
                 deleteFlds.append(fld)
 
         arcpy.DeleteField_management(finalHELSummary,deleteFlds)
-        del zoneFld,tabulateFields,newFields,validFlds
+        del zoneFld,finalHELSummaryFlds,tabulateFields,newFields,validFlds
 
         ### ---------------------------------------------------------------------------------------------------- Determine if field is HEL/NHEL"""
         outFieldTabulate = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("HEL_Field_Tabulate",data_type="ArcInfoTable",workspace=scratchWS))
@@ -1949,7 +1972,13 @@ if __name__ == '__main__':
             for row in cursor:
 
                 expression = arcpy.AddFieldDelimiters(outFieldTabulate,cluNumberFld) + " = " + str(row[3])
-                outTabulateValues = ([(rows[0],rows[1]) for rows in arcpy.da.SearchCursor(outFieldTabulate, ("VALUE_1","VALUE_2"), where_clause = expression)])[0]
+
+                # There is no HEL; set HEL to 0
+                if bOnlyNHEL:
+                    outTabulateValues = ([(rows[0],0) for rows in arcpy.da.SearchCursor(outFieldTabulate, ("VALUE_1"), where_clause = expression)])[0]
+                else:
+                     outTabulateValues = ([(rows[0],rows[1]) for rows in arcpy.da.SearchCursor(outFieldTabulate, ("VALUE_1","VALUE_2"), where_clause = expression)])[0]
+
                 acreConversion = acreConversionDict.get(arcpy.Describe(fieldDetermination).SpatialReference.LinearUnitName)
 
                 # if results are completely HEL or NHEL then get total clu acres from ogCLUinfoDict
