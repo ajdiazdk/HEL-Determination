@@ -224,6 +224,18 @@
 #   services' linear units are set to degrees, which isn't a valid z-unit.  A check was put
 #   in place.  the Z-units are set to the projected dem linear units.
 
+# Updated 7/17/2019
+# - Received an error from Julie Pitts: ERROR 000728: Field OBJECTID_1_1 does not exist within
+#   table.  When joining 2 tables using OBJECTID as a join field, the output table will
+#   create its own OBJECTID forcing the join field to be renamed to OBJECTID_1.  However, if
+#   one of the incoming tables has an existing OBJECTID_1 then it creates a problem.  A fix
+#   was introduced to look for an "_" in the OID fieldname and append "_1" to that field if it
+#   is present.  This should take care of any errors with join fields.
+# - It turns out that the field level determination calculation was wrong.  The tool was summarizing
+#   HEL values, inlcuding pixels from geoprocessing to determing if field was HEL.  The tool
+#   has been updated to reflect sums of acres from polygons that are HEL and then making the field
+#   evaluation.
+
 #-------------------------------------------------------------------------------
 
 ## ===================================================================================
@@ -854,147 +866,6 @@ def removeScratchLayers():
         pass
 
 ## ================================================================================================================
-def AddLayersToArcMapOLD():
-    # This Function will add necessary layers to ArcMap and prepare their
-    # symbology.  The 1026 form will also be prepared.
-
-    try:
-        # Put this section in a try-except. It will fail if run from ArcCatalog
-        mxd = arcpy.mapping.MapDocument("CURRENT")
-        df = arcpy.mapping.ListDataFrames(mxd)[0]
-
-        # redundant workaround.  ListLayers returns a list of layer objects
-        # had to create a list of layer name Strings in order to see if a
-        # specific layer currently exists in Arcmap.
-        currentLayersObj = arcpy.mapping.ListLayers(mxd)
-        currentLayersStr = [str(x) for x in arcpy.mapping.ListLayers(mxd)]
-
-        # List of layers to add to Arcmap (layer path, arcmap layer name)
-        if bNoPHELvalues or bSkipGeoprocessing:
-            addToArcMap = [(helSummary,"Initial HEL Summary"),(fieldDetermination,"Field Determination")]
-
-            # Remove Final HEL Map if present in MXD since a Final Map was not produced
-            if 'Final HEL Map' in currentLayersStr:
-                arcpy.mapping.RemoveLayer(df,currentLayersObj[currentLayersStr.index('Final HEL Map')])
-
-        else:
-            addToArcMap = [(lidarHEL,"LiDAR HEL Summary"),(helSummary,"Initial HEL Summary"),(finalHELSummary,"Final HEL Summary"),(fieldDetermination,"Field Determination")]
-
-        for layer in addToArcMap:
-
-            # remove layer from ArcMap if it exists
-            if layer[1] in currentLayersStr:
-                arcpy.mapping.RemoveLayer(df,currentLayersObj[currentLayersStr.index(layer[1])])
-
-            # Either create Feature layer or Raster layer
-            if layer[1] == "LiDAR HEL Summary":
-                tempLayer = arcpy.MakeRasterLayer_management(layer[0],layer[1])
-            else:
-                tempLayer = arcpy.MakeFeatureLayer_management(layer[0],layer[1])
-
-            result = tempLayer.getOutput(0)
-            symbologyLyr = os.path.join(os.path.dirname(sys.argv[0]),layer[1].lower().replace(" ","") + ".lyr")
-
-            arcpy.ApplySymbologyFromLayer_management(result,symbologyLyr)
-            arcpy.RefreshTOC()
-
-            # The 'Initial Summary Layer' that was being added to ArcMap had duplicate
-            # labels in spite of being multi-part.  By adding the .lyr file
-            # to ArcMap instead of the feature class (don't understand why)
-            if layer[1] == "Initial HEL Summary":
-                initialHelSummaryLYR = arcpy.mapping.Layer(symbologyLyr)
-                arcpy.mapping.AddLayer(df, initialHelSummaryLYR, "TOP")
-
-                # Turn this layer off
-                for lyr in arcpy.mapping.ListLayers(mxd, layer[1]):
-                    lyr.visible = False
-
-##            else:
-##                arcpy.mapping.AddLayer(df, result, "TOP")
-
-            """ The following code will update the layer symbology for Initial HEL Summary Layer"""
-##                # to NOT include AOI acres and percentage.
-##                if layer[1] == "HEL Summary Layer":
-##                    lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-##                    # lyr.symbology.classLabels = ogHELsymbologyLabels
-##                    # lyr.visible = False
-##                    # arcpy.RefreshActiveView()
-##                    # arcpy.RefreshTOC()
-##                    # del ly
-##                    expression = """[HEL] & vbNewLine &  round([HEL_Acres] ,1) & "ac." & " (" & round([HEL_AcrePct] ,1) & "%)" & vbNewLine """
-##                    if lyr.supports("LABELCLASSES"):
-##                        for lblClass in lyr.labelClasses:
-##                            if lblClass.showClassLabels:
-##                                lblClass.expression = expression
-##                        lyr.showLabels = True
-##                        arcpy.RefreshActiveView()
-##                        arcpy.RefreshTOC()
-##                    del lyr
-
-            """ The following code will update the layer symbology for the LiDAR HEL Summary (raster). """
-            # cannot add acres and percent "by AOI". acres and percent can only be calculated by CLU field.
-            if layer[1] == "LiDAR HEL Summary":
-                lidarHELSummaryLYR = arcpy.mapping.Layer(symbologyLyr)
-                arcpy.mapping.AddLayer(df, lidarHELSummaryLYR, "TOP")
-
-                lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-                newHELsymbologyLabels = []
-                acreConversion = acreConversionDict.get(arcpy.Describe(fieldDetermination).SpatialReference.LinearUnitName)
-
-                if bNoPHELvalues:
-                   if "HEL" in helSummaryDict:
-                      newHELsymbologyLabels.append("HEL")
-                   if "NHEL" in helSummaryDict:
-                      newHELsymbologyLabels.append("NHEL")
-
-                else:
-                    HEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outFieldTabulate, ("VALUE_2"))])/acreConversion
-                    NHEL = sum([rows[0] for rows in arcpy.da.SearchCursor(outFieldTabulate, ("VALUE_1"))])/acreConversion
-
-                    if HEL > 0:
-                       newHELsymbologyLabels.append("HEL")
-
-                    if NHEL > 0:
-                       newHELsymbologyLabels.append("NHEL")
-
-                lyr.symbology.classBreakLabels = newHELsymbologyLabels
-
-                # Turn this layer off
-                for lyr in arcpy.mapping.ListLayers(mxd, layer[1]):
-                    lyr.visible = False
-
-                arcpy.RefreshActiveView()
-                arcpy.RefreshTOC()
-                del lyr,newHELsymbologyLabels
-
-            if layer[1] == "Field Determination":
-                fldDeterminationLYR = arcpy.mapping.Layer(symbologyLyr)
-                arcpy.mapping.AddLayer(df, fldDeterminationLYR, "TOP")
-
-                lyr = arcpy.mapping.ListLayers(mxd, layer[1])[0]
-                #expression = """def FindLabel ( [CLUNBR], [HEL_Acres], [HEL_AcrePct], [HEL_YES] ):  return "CLU #: " + [CLUNBR] + "\nHEL Acres: " + str(round(float([HEL_Acres]),1)) + " (" + str(round(float( [HEL_Pct] ),1)) + "%)\nHEL: " + [HEL_YES]"""
-                #expression = """"Tract: " & [TRACTNBR] & vbNewLine & "CLU #: " & [CLUNBR] & vbNewLine & round([HEL_Acres] ,1) & " ac." & " (" & round([HEL_Pct] ,1) & "%)" & vbNewLine & [HEL_YES]"""
-                expression = """"Field " & [CLUNBR] & vbNewLine & round([CALCACRES] ,1) & " ac." & vbNewLine & [HEL_YES]"""
-
-                if lyr.supports("LABELCLASSES"):
-                    for lblClass in lyr.labelClasses:
-                        if lblClass.showClassLabels:
-                            lblClass.expression = expression
-                    lyr.showLabels = True
-                    arcpy.RefreshActiveView()
-                    arcpy.RefreshTOC()
-
-            if layer[1] == "Final HEL Summary":
-                finalHELSummaryLYR = arcpy.mapping.Layer(symbologyLyr)
-                arcpy.mapping.AddLayer(df, finalHELSummaryLYR, "TOP")
-
-            AddMsgAndPrint("Added " + layer[1] + " to your ArcMap Session",0)
-
-    except:
-        errorMsg()
-
-
-## ================================================================================================================
 def AddLayersToArcMap():
     # This Function will add necessary layers to ArcMap.  Nothing is returned
     # If no PHEL Values were present only 2 layers will be added: Initial HEL Summary
@@ -1389,7 +1260,6 @@ if __name__ == '__main__':
         arcpy.CalculateField_management(fieldDetermination,calcAcreFld,"!shape.area@acres!","PYTHON_9.3")
         totalAcres = float("%.1f" % (sum([row[0] for row in arcpy.da.SearchCursor(fieldDetermination, (calcAcreFld))])))
         AddMsgAndPrint("\tTotal Acres: " + splitThousands(totalAcres))
-        del totalAcres
 
         ## ------------------------------------------------------------------------------------------------------------ Z-factor conversion Lookup table
         # lookup dictionary to convert XY units to area.  Key = XY unit of DEM; Value = conversion factor to sq.meters
@@ -1464,7 +1334,7 @@ if __name__ == '__main__':
         maxAcreLength = list()      ## Stores the number of acre digits for formatting purposes
         bNoPHELvalues = False       ## Boolean flag to indicate PHEL values are missing
 
-        # Og_HELcode, Og_HEL_Acres, Og_HEL_AcrePct, "SHAPE@AREA", "CALCACRES"
+        # HEL Field, Og_HELcode, Og_HEL_Acres, Og_HEL_AcrePct, "SHAPE@AREA", "CALCACRES"
         with arcpy.da.UpdateCursor(helSummary,[helFld,HELrasterCode,HELacres,HELacrePct,"SHAPE@AREA",calcAcreFld]) as cursor:
             for row in cursor:
 
@@ -1613,14 +1483,6 @@ if __name__ == '__main__':
                     #AddMsgAndPrint("\t\t\t" + pivotFields[i] + firstSpace + " -- " + str(acres) + secondSpace + " .ac -- " + str(pct) + " %")
                     del acres,pct,firstSpace,secondSpace
 
-##                # If og_cluHELrating was not populated above then assign the HEL value of the maximum acre.
-##                # og_cluHELrating should be populated by this point.
-##                if og_cluHELrating == "":
-##                    og_cluHELdetermination = str(pivotFields[og_cluHELacresList.index(max(og_cluHELacresList)) + 1])
-##                    pct = og_cluHELpctList[og_cluHELacresList.index(max(og_cluHELacres))]
-##                    ogCLUinfoDict[row[0]] = (og_cluHELrating,cluAcres,pct)
-##                    AddMsgAndPrint("Assigned value4: " + og_cluHELrating)
-
                 # Skip geoprocessing if HEL >=33.33% or NHEL > 66.6%
                 if bSkipGeoprocessing:
                    if not bHELgreaterthan33 and not bNHELgreaterthan66:
@@ -1639,29 +1501,6 @@ if __name__ == '__main__':
 
         del stats,caseField,sumHELacreFld,pivotFields,numOfhelValues,maxAcreLength
 
-        ### ---------------------------------------------------------------------------------------------------------  Report HEl Layer Summary by Project AOI
-        # It was determined that a summary by Project AOI was not needed.  Uncomment to re-add it.
-##        ogHELsymbologyLabels = []
-##        validHELsymbologyValues = ['HEL','NHEL','PHEL']
-##        maxAcreLength = len(str(sorted([acres for val,acres in helSummaryDict.iteritems()],reverse=True)[0]))
-##        AddMsgAndPrint("\n\tSummary by AOI:")
-##
-##        for val in validHELsymbologyValues:
-##            if val in helSummaryDict:
-##                acres = helSummaryDict[val]
-##                pct = float("%.1f" %((acres/totalIntAcres)*100))
-##                if pct > 100.0: pct = 100.0
-##
-##                acres = float("%.1f" %(acres))                         # Strictly for formatting
-##                firstSpace = " " * (4-len(val))                        # PHEL has 4 characters
-##                secondSpace = " " * (maxAcreLength - len(str(acres)))  # Number of spaces
-##                AddMsgAndPrint("\t\t" + val + firstSpace + " -- " + str(acres) + " .ac -- " + str(pct) + " %")
-##                ogHELsymbologyLabels.append(val + " -- " + str(acres) +  secondSpace + " .ac -- " + str(pct) + " %")
-##                del acres,pct,firstSpace,secondSpace
-##
-##        AddMsgAndPrint("\n")
-##        del helSummaryDict,validHELsymbologyValues,maxAcreLength
-
         # ------------------------------------------------------------------------- No PHEL Values Found
         # If there are no PHEL Values add helSummary and fieldDetermination layers to ArcMap
         # and prepare 1026 form.  Skip geoProcessing.
@@ -1671,7 +1510,10 @@ if __name__ == '__main__':
             if bNoPHELvalues:
                AddMsgAndPrint("\n\tThere are no PHEL values in HEL layer",1)
                AddMsgAndPrint("\tNo Geoprocessing is required.")
-            if bSkipGeoprocessing:
+
+            # Only Print this if there are PHEL values but they don't need
+            # to be processed; Otherwise it should be captured by above statement.
+            if bSkipGeoprocessing and not bNoPHELvalues:
                AddMsgAndPrint("\n\tHEL values are >= 33.33% or NHEL values > 66.66%",1)
                AddMsgAndPrint("\tNo Geoprocessing is required.\n")
 
@@ -1879,16 +1721,22 @@ if __name__ == '__main__':
                else:
                     arcpy.AddField_management(finalHELSummary,fld,"DOUBLE")
 
-        arcpy.JoinField_management(finalHELSummary,zoneFld,outPolyTabulate,zoneFld + "_1",tabulateFields)
+        # In some cases, the finalHELSummary layer's OID field name was "OBJECTID_1" which
+        # conflicted with the output of the tabulate area table.
+        if zoneFld.find("_") > -1:
+            outputJoinFld = zoneFld
+        else:
+            outputJoinFld = zoneFld + "_1"
+        arcpy.JoinField_management(finalHELSummary,zoneFld,outPolyTabulate,outputJoinFld,tabulateFields)
 
         # Booleans to indicate if only HEL or only NHEL is present
         bOnlyHEL = False; bOnlyNHEL = False
 
-        # Check if VALUE_1 or VALUE_2 are missing from outPolyTabulate table
+        # Check if VALUE_1(NHEL) or VALUE_2(HEL) are missing from outPolyTabulate table
         finalHELSummaryFlds = [fld.name for fld in arcpy.ListFields(finalHELSummary)][2:]
         if len(finalHELSummaryFlds):
 
-            # NHEL is not Present - All is HEL; All is VALUE2
+            # NHEL is not Present - so All is HEL; All is VALUE2
             if not "VALUE_1" in tabulateFields:
                 AddMsgAndPrint("\tWARNING: Entire Area is HEL",1)
                 arcpy.AddField_management(finalHELSummary,"VALUE_1","DOUBLE")
@@ -1907,8 +1755,12 @@ if __name__ == '__main__':
 
         newFields.append("VALUE_2")
         newFields.append("SHAPE@AREA")
+        newFields.append(cluNumberFld)
 
-        # [polyAcres,finalHELvalue,finalHELacres,finalHELpct,"VALUE_2","SHAPE@AREA"]
+        # this will be used for field determination
+        fieldDeterminationDict = dict()
+
+        # [polyAcres,finalHELvalue,finalHELacres,finalHELpct,"VALUE_2","SHAPE@AREA","CLUNBR"]
         with arcpy.da.UpdateCursor(finalHELSummary,newFields) as cursor:
             for row in cursor:
 
@@ -1929,11 +1781,25 @@ if __name__ == '__main__':
                 # set pct to 100 if its greater; rounding issue
                 if row[3] > 100.0: row[3] = 100.0
 
-                # Determine polygon HEL Value using 50% threshold
+                # polygon HEL Pct is greater than 50%; HEL
                 if row[3] > 50.0:
                     row[1] = "HEL"
+
+                    # Add the HEL polygon acres to the dict
+                    if not row[6] in fieldDeterminationDict:
+                        fieldDeterminationDict[row[6]] = row[0]
+                    else:
+                        fieldDeterminationDict[row[6]] += row[0]
+
+                # polygon HEL Pct is less than 50%; NHEL
                 else:
                     row[1] = "NHEL"
+
+                    # Don't Add NHEL polygon acres to dict but place
+                    # holder for the clu
+                    if not row[6] in fieldDeterminationDict:
+                        fieldDeterminationDict[row[6]] = 0
+
                 cursor.updateRow(row)
 
         # Delete unwanted fields from the finalHELSummary Layer
@@ -1950,10 +1816,6 @@ if __name__ == '__main__':
         del zoneFld,finalHELSummaryFlds,tabulateFields,newFields,validFlds
 
         ### ---------------------------------------------------------------------------------------------------- Determine if field is HEL/NHEL"""
-        outFieldTabulate = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("HEL_Field_Tabulate",data_type="ArcInfoTable",workspace=scratchWS))
-        #outFieldTabulate = arcpy.CreateScratchName("HEL_Field_Tabulate",data_type="ArcInfoTable",workspace=scratchWS)
-        TabulateArea(fieldDetermination,cluNumberFld,lidarHEL,"VALUE",outFieldTabulate,cellSize)
-
         # Add 3 fields to fieldDetermination layer
         fieldList = ["HEL_YES","HEL_Acres","HEL_Pct"]
         for field in fieldList:
@@ -1971,19 +1833,7 @@ if __name__ == '__main__':
         with arcpy.da.UpdateCursor(fieldDetermination,fieldList) as cursor:
             for row in cursor:
 
-                expression = arcpy.AddFieldDelimiters(outFieldTabulate,cluNumberFld) + " = " + str(row[3])
-
-                # There is no HEL; set HEL to 0
-                if bOnlyNHEL:
-                    outTabulateValues = ([(rows[0],0) for rows in arcpy.da.SearchCursor(outFieldTabulate, ("VALUE_1"), where_clause = expression)])[0]
-                else:
-                     outTabulateValues = ([(rows[0],rows[1]) for rows in arcpy.da.SearchCursor(outFieldTabulate, ("VALUE_1","VALUE_2"), where_clause = expression)])[0]
-
-                acreConversion = acreConversionDict.get(arcpy.Describe(fieldDetermination).SpatialReference.LinearUnitName)
-
                 # if results are completely HEL or NHEL then get total clu acres from ogCLUinfoDict
-                # b/c Sometimes the results will slightly vary b/c of the raster pixels.
-                # Otherwise compute them from the tabulateArea results.
                 if bOnlyHEL or bOnlyNHEL:
                     if bOnlyHEL:
                         helAcres = ogCLUinfoDict.get(row[3])[1]
@@ -1996,16 +1846,16 @@ if __name__ == '__main__':
                         helPct = 0.0
                         nhelPct = 100.0
                 else:
-                    nhelAcres = outTabulateValues[0] / acreConversion
-                    helAcres = float(outTabulateValues[1]) / acreConversion
+                    helAcres = fieldDeterminationDict[row[3]]    # total HEL acres for field
+                    helPct = (helAcres / row[4]) * 100           # helAcres / CALCACRES
 
-                    totalAcres =  (outTabulateValues[0] + outTabulateValues[1]) / acreConversion
-                    helPct = (helAcres / totalAcres) * 100
-                    nhelPct = (nhelAcres / totalAcres) * 100
+                    nhelAcres = row[4] - helAcres
+                    nhelPct = 100 - helPct
 
-                # set default values
-                row[1] = helAcres
-                row[2] = helPct
+                    # set pct to 100 if its greater; rounding issue
+                    if helPct > 100.0: helPct = 100.0
+                    if nhelPct > 100.0: nhelPct = 100.0
+
                 clu = row[3]
 
                 if helPct >= 33.33 or helAcres > 50.0:
@@ -2013,13 +1863,17 @@ if __name__ == '__main__':
                 else:
                     row[0] = "NHEL"
 
+                row[1] = helAcres
+                row[2] = helPct
+
                 helAcres = float("%.1f" %(helAcres))   # Strictly for formatting
                 helPct = float("%.1f" %(helPct))       # Strictly for formatting
                 nhelAcres = float("%.1f" %(nhelAcres)) # Strictly for formatting
                 nhelPct = float("%.1f" %(nhelPct))     # Strictly for formatting
 
                 cluDict[clu] = (helAcres,len(str(helAcres)),helPct,nhelAcres,len(str(nhelAcres)),nhelPct,row[0]) #  {8: (25.3, 4, 45.1, 30.8, 4, 54.9, 'HEL')}
-                del expression,outTabulateValues,helAcres,helPct,nhelAcres,nhelPct,clu
+                del helAcres,helPct,nhelAcres,nhelPct,clu
+
                 cursor.updateRow(row)
         del cursor
 
