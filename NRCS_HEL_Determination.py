@@ -235,6 +235,10 @@
 #   HEL values, inlcuding pixels from geoprocessing to determing if field was HEL.  The tool
 #   has been updated to reflect sums of acres from polygons that are HEL and then making the field
 #   evaluation.
+# - Added "NA" as a valid HEL attribute.  It will be processed as NHEL.
+# - Updated validation code to find HEL Layer from the Arcmap TOC based on the new schema of
+#   'HEL_Frozen_a'
+# - Added a check to make sure a DEM is present if PHEL attributes are present.
 
 #-------------------------------------------------------------------------------
 
@@ -1349,6 +1353,8 @@ if __name__ == '__main__':
                     row[1] = 1
                 elif row[0] == "PHEL":
                     row[1] = 2
+                elif row[0] == "NA":
+                    row[1] = 1
                 else:
                     if not str(row[0]) in wrongHELvalues:
                         wrongHELvalues.append(str(row[0]))
@@ -1529,6 +1535,14 @@ if __name__ == '__main__':
             sys.exit()
 
         ### ---------------------------------------------------------------------------------------------- Check and create DEM clip from buffered CLU
+        # Exit if a DEM is not present; At this point PHEL mapunits are present
+        # and requires a DEM to process them.
+        try:
+            arcpy.Describe(inputDEM).baseName
+        except:
+            AddMsgAndPrint("\nDEM is required to process PHEL values. EXITING!")
+            sys.exit()
+
         zFactor,dem = extractDEM(inputDEM,zUnits)
         if not zFactor or not dem:
            removeScratchLayers()
