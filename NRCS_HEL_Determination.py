@@ -18,6 +18,11 @@
 # e-mail: christian.roy@usda.gov
 # phone: 507.405.3580
 
+# Contributor: Chris Morse
+#              IN State GIS Specialist
+# e-mail: chris.morse@usda.gov
+# phone: 317-295-5849
+
 # ==========================================================================================
 # Modified 10/24/2016
 # Line 705; outflowLengthFT was added to the scratchLayers to be deleted.  It should've
@@ -26,14 +31,6 @@
 # The acreConversion variable was updated to reference a dictionary instead.  The original
 # acreConversion variable was being determined from the DEM.  If input DEM was in FT then
 # the wrong acre conversion was applied to layers that were in Meters.
-
-# ==========================================================================================
-# Modified 11/19/2018
-# Tim Prescott was having acre disrepancies.  He had a wide variety of coordinate systems
-# in his arcmap project.  I couldn't isolate the problem but I wound up changine
-# the way the z-factor is assigned.  I was assuming a meter and/or feet combination but
-# there could be other combinations like centimeters. Created a matrix of XY and Z
-# unit combinations to be used as a look up table.
 
 # ==========================================================================================
 # Modified 11/19/2018
@@ -239,6 +236,22 @@
 # - Updated validation code to find HEL Layer from the Arcmap TOC based on the new schema of
 #   'HEL_Frozen_a'
 # - Added a check to make sure a DEM is present if PHEL attributes are present.
+
+# Updated 8/12/2019, C.E.M.
+# - Re-runs would crash on ArcMap 10.6.1 and up. Changed scratch workspace for K, T, R, and
+#   HELValue layers to use the scratch.gdb instead of memory to avoid this crash.
+# - Updated L-factor formula to use 72.6 as the constant (per AH 537 pg. 12)
+# - Updated S-factor formula to use radians from slope % (per AH 537 pg. 12)
+# - Updated zfactor conversion lookups to correctly handle a variety of input DEMs
+# - Updated conditions for conversion of flow length layer to feet to use new linear units
+#   from the dem returned from the extractDEM function. Previous condition assessing zUnits
+#   led to incorrect results when using DEMs with vertical feet.
+# - Set Snap Raster environment equal to the final dem returned from extract DEM. This
+#   setting properly aligns the rasters generated from the soils for K, T, and R to fit
+#   to the DEM pixel space. We can't use the soils layer to generate snap rasters from the
+#   K, T, or R layers that are generated because the origin for those layers will vary clip
+#   to clip and site to site, compared to a stock DEM that already exists in pixel space. Also,
+#   shifting the DEM would reduce confidence in slope percentage and length computations.
 
 #-------------------------------------------------------------------------------
 
@@ -690,7 +703,8 @@ def extractDEMfromImageService(demSource,zUnits):
         # if zUnits not populated assume it is the same as linearUnits
         if not zUnits: zUnits = newLinearUnits
 
-        newZfactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(newLinearUnits)]
+        #newZfactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(newLinearUnits)]
+        newZfactor = zFactorList[unitLookUpDict.get(newLinearUnits)][unitLookUpDict.get(zUnits)]
 
         AddMsgAndPrint("\t\tNew Projection Name: " + newSR.Name,0)
         AddMsgAndPrint("\t\tLinear Units (XY): " + newLinearUnits)
@@ -699,7 +713,7 @@ def extractDEMfromImageService(demSource,zUnits):
         AddMsgAndPrint("\t\tZ-Factor: " + str(newZfactor))
 
         #AddMsgAndPrint(toc(startTime))
-        return newZfactor,demProject
+        return newLinearUnits,newZfactor,demProject
 
     except:
         errorMsg()
@@ -785,8 +799,9 @@ def extractDEM(inputDEM,zUnits):
         bZunits = True
         if not zUnits: zUnits = linearUnits; bZunits = False
 
-         # look up zFactor based on units (z,xy -- I should've reversed the table)
-        zFactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(linearUnits)]
+        # look up zFactor based on units (z,xy -- I should've reversed the table)
+        #zFactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(linearUnits)]
+        zFactor = zFactorList[unitLookUpDict.get(linearUnits)][unitLookUpDict.get(zUnits)]
 
         # ------------------------------------------------------------------------------------ Print Input DEM properties
         AddMsgAndPrint("\tProjection Name: " + sr.Name)
@@ -836,7 +851,8 @@ def extractDEM(inputDEM,zUnits):
         newSR = desc.SpatialReference
         newLinearUnits = newSR.LinearUnitName
         newCellSize = desc.MeanCellWidth
-        newZfactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(newLinearUnits)]
+        #newZfactor = zFactorList[unitLookUpDict.get(zUnits)][unitLookUpDict.get(newLinearUnits)]
+        newZfactor = zFactorList[unitLookUpDict.get(newLinearUnits)][unitLookUpDict.get(zUnits)]
 
         if newSR.name != sr.Name:
             AddMsgAndPrint("\t\tNew Projection Name: " + newSR.Name,0)
@@ -846,7 +862,7 @@ def extractDEM(inputDEM,zUnits):
             AddMsgAndPrint("\t\tNew Z-Factor: " + str(newZfactor))
 
         arcpy.Delete_management(cluBuffer)
-        return newZfactor,demExtract
+        return newLinearUnits,newZfactor,demExtract
 
     except:
         errorMsg()
@@ -856,16 +872,21 @@ def extractDEM(inputDEM,zUnits):
 def removeScratchLayers():
     # This function is the last task that is executed or gets invoked in
     # an except clause.  Simply removes all temporary scratch layers.
-
-    import itertools
+    #import itertools
 
     try:
-        for lyr in list(itertools.chain(*scratchLayers)):
-            if arcpy.Exists(lyr):
-                try:
-                    arcpy.Delete_management(lyr)
-                except:
-                    continue
+        #for lyr in list(itertools.chain(*scratchLayers)):
+        #arcpy.AddMessage("The scratch layers are: " + str(scratchLayers))
+        #for lyr in scratchLayers:
+            #arcpy.AddMessage("Layer name: " + str(lyr) + " is in the scratchLayers list.")
+        for lyr in scratchLayers:
+            #if arcpy.Exists(lyr):
+            try:
+                #arcpy.AddMessage("Deleting Layer: " + str(lyr))
+                arcpy.Delete_management(lyr)
+            except:
+                arcpy.AddMessage("Deleting Layer: " + str(lyr) + " failed.")
+                continue
     except:
         pass
 
@@ -1086,7 +1107,15 @@ def populateForm():
 
         if bAccess:
             AddMsgAndPrint("\tOpening NRCS-CPA-026e Form",0)
-            subprocess.Popen([msAccessPath,helDatabase])
+            try:
+                subprocess.Popen([msAccessPath,helDatabase])
+            except:
+                try:
+                    os.startfile(helDatabase)
+                except:
+                    AddMsgAndPrint("\tCould not locate the Microsoft Access Software",1)
+                    AddMsgAndPrint("\tOpen Microsoft Access manually to access the NRCS-CPA-026e Form",1)
+                    arcpy.SetProgressorLabel("Could not locate the Microsoft Access Software")
         else:
             AddMsgAndPrint("\tCould not locate the Microsoft Access Software",1)
             AddMsgAndPrint("\tOpen Microsoft Access manually to access the NRCS-CPA-026e Form",1)
@@ -1160,6 +1189,7 @@ if __name__ == '__main__':
         fieldDetermination = os.path.join(helDatabase, r'Field_Determination')
         helSummary = os.path.join(helDatabase, r'Initial_HEL_Summary')
         lidarHEL = os.path.join(helDatabase, r'LiDAR_HEL_Summary')
+        #lidarHEL = os.path.dirname(sys.argv[0]) + os.sep + r'LiDAR_HEL_Summary.img'
         finalHELSummary = os.path.join(helDatabase, r'Final_HEL_Summary')
         accessLayers = [fieldDetermination,helSummary,lidarHEL,finalHELSummary]
 
@@ -1543,11 +1573,14 @@ if __name__ == '__main__':
             AddMsgAndPrint("\nDEM is required to process PHEL values. EXITING!")
             sys.exit()
 
-        zFactor,dem = extractDEM(inputDEM,zUnits)
+        units,zFactor,dem = extractDEM(inputDEM,zUnits)
         if not zFactor or not dem:
            removeScratchLayers()
            sys.exit()
         scratchLayers.append(dem)
+
+        ### ----------------------------------------------------------------------------------------------------------------------------- Set Snap Raster
+        arcpy.env.snapRaster = dem
 
         ### -------------------------------------------------------------------------------------------------------------------------- Create Slope Layer
         arcpy.SetProgressorLabel("Creating Slope Derivative")
@@ -1587,8 +1620,10 @@ if __name__ == '__main__':
         #outFocalStatistics.save(flowLength)
         scratchLayers.append(flowLength)
 
-        # convert Flow Length distance units to feet if original DEM is not in feet.
-        if not zUnits in ('Feet','Foot','Foot_US'):
+        # convert Flow Length distance units to feet if original DEM LINEAR UNITS ARE not in feet.
+        # Change this zUnits reference!
+        #if not zUnits in ('Feet','Foot','Foot_US'):
+        if not units in ('Feet','Foot','Foot_US'):
             AddMsgAndPrint("Converting Flow Length Distance units to Feet")
             #flowLengthFT = arcpy.CreateScratchName("flowLength_FT",data_type="RasterDataset",workspace=scratchWS)
             #outflowLengthFT = Raster(flowLength) * 3.280839896
@@ -1607,8 +1642,15 @@ if __name__ == '__main__':
         AddMsgAndPrint("\nCalculating S Factor")
         #sFactor = arcpy.CreateScratchName("sFactor",data_type="RasterDataset",workspace=scratchWS)
         #outsFactor = (Power(Raster(slope),2) * 0.006541) + ((Raster(slope) * 0.0456) + 0.065)       ## Original Line
-        sFactor = (Power(slope,2) * 0.006541) + ((slope * 0.0456) + 0.065)
+        #sFactor = (Power(slope,2) * 0.006541) + ((slope * 0.0456) + 0.065)
         #outsFactor.save(sFactor)
+
+        # Convert slope percent to radians
+        radians = ATan(Times(slope,0.01))
+        scratchLayers.append(radians)
+
+        # Compute S factor using formula in AH537, pg 12
+        sFactor = ((Power(Sin(radians),2)*65.41)+(Sin(radians)*4.56)+(0.065))
         scratchLayers.append(sFactor)
 
         # ------------------------------------------------------------------------------ Calculate L Factor
@@ -1623,16 +1665,16 @@ if __name__ == '__main__':
         #lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
 
         # Original outlFactor lines
-        """outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.2),
-                           Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.3),
-                           Con(Raster(slope),Power(Raster(flowLengthFT) / 72.5,0.4),
-                           Power(Raster(flowLengthFT) / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")"""
+        """outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.2),
+                           Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.3),
+                           Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.4),
+                           Power(Raster(flowLengthFT) / 72.6,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")"""
 
         # Remove 'Raster' function from above
-        lFactor = Con(slope,Power(flowLengthFT / 72.5,0.2),
-                        Con(slope,Power(flowLengthFT / 72.5,0.3),
-                        Con(slope,Power(flowLengthFT / 72.5,0.4),
-                        Power(flowLengthFT / 72.5,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
+        lFactor = Con(slope,Power(flowLengthFT / 72.6,0.2),
+                        Con(slope,Power(flowLengthFT / 72.6,0.3),
+                        Con(slope,Power(flowLengthFT / 72.6,0.4),
+                        Power(flowLengthFT / 72.6,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
 
         #outlFactor.save(lFactor)
         scratchLayers.append(lFactor)
@@ -1651,16 +1693,17 @@ if __name__ == '__main__':
         AddMsgAndPrint("\nConverting Vector to Raster for Spatial Analysis Purpose")
         cellSize = arcpy.Describe(dem).MeanCellWidth
 
-        # All raster datasets will be created in memory
-        kFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS))
-        tFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS))
-        rFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS))
-        helValue = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS))
+        # (Works in 10.5 and under, but not 10.6 and up) All raster datasets will be created in memory
+##        kFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS))
+##        tFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS))
+##        rFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS))
+##        helValue = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS))
 
-        #kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
-        #tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
-        #rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
-        #helValue = arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS)
+        # This works in 10.6.1 but slows processing
+        kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
+        tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
+        rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
+        helValue = arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS)
 
         arcpy.SetProgressorLabel("Converting K Factor field to a raster")
         AddMsgAndPrint("\tConverting K Factor field to a raster")
@@ -1678,7 +1721,11 @@ if __name__ == '__main__':
         AddMsgAndPrint("\tConverting HEL Value field to a raster")
         arcpy.FeatureToRaster_conversion(helSummary,HELrasterCode,helValue,cellSize)
 
-        scratchLayers.append((kFactor,tFactor,rFactor,helValue))
+        #scratchLayers.append((kFactor,tFactor,rFactor,helValue))
+        scratchLayers.append(kFactor)
+        scratchLayers.append(tFactor)
+        scratchLayers.append(rFactor)
+        scratchLayers.append(helValue)
 
         ### ------------------------------------------------------------------------------------------------------------- Calculate EI Factor
         arcpy.SetProgressorLabel("Calculating EI Factor")

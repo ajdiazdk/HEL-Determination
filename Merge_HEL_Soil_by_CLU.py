@@ -275,7 +275,7 @@ try:
         sys.exit()
 
     # List of valid HEL soil layer schema for the tool (in lower case for comparative purposes)
-    schema = ["map_sym", "muname", "hel", "whel", "t", "kw", "r"]
+    schema = ["areasymbol", "spatialver", "musym", "muname", "muhelcl", "t", "k", "r"]
     # Check the input soil layers to make sure they contain fields with the same field names
     x = 0
     for layer in source_soils:
