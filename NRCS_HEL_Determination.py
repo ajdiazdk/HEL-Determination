@@ -155,7 +155,7 @@
 #     service function could use a little more work to determine cell resolution of
 #     a service in WGS84.
 # 13) Bypass geoprocessing if field is HEL and (pct >= 33.3 or acres >= 50) OR
-#     NHEL pct > 66.66.  The boolean bSkipGeoprocessing will is set to True by default
+#     NHEL pct > 66.67.  The boolean bSkipGeoprocessing will is set to True by default
 #     until 1 field does not meet the HEL or NHEL criteria above, in which case the
 #     field will have to be analyzed using LiDAR.  If 1 field requires geoprocessing
 #     ALL fields will be processed.
@@ -237,7 +237,7 @@
 #   'HEL_Frozen_a'
 # - Added a check to make sure a DEM is present if PHEL attributes are present.
 
-# Updated 8/12/2019, C.E.M.
+# Updated 8/12/2019, C.M.
 # - Re-runs would crash on ArcMap 10.6.1 and up. Changed scratch workspace for K, T, R, and
 #   HELValue layers to use the scratch.gdb instead of memory to avoid this crash.
 # - Updated L-factor formula to use 72.6 as the constant (per AH 537 pg. 12)
@@ -252,6 +252,32 @@
 #   K, T, or R layers that are generated because the origin for those layers will vary clip
 #   to clip and site to site, compared to a stock DEM that already exists in pixel space. Also,
 #   shifting the DEM would reduce confidence in slope percentage and length computations.
+
+# Updated 8/15/2019, C.M.
+# - A Fill function is run on the DEM prior to creating derivative layers. The fill surface is
+#   limited to filling depths no greater than 1 foot. A conversion factor for setting the fill
+#   limit was created to express the limit in amounts that correspond to the input DEM's Z units.
+#   If no Z Units are specified, the smallest fill amount is assumed (0.3048, as if units are
+#   meters).
+# - Focal Statistics Mean was moved from running on slope to running on the DEM, per typically
+#   accepted lidar-based DEM modeling workflows for creating slope percentage.
+
+# Updated 8/20/2019, C.M.
+# - Created a new map layout for use in the release version where map elements are tagged
+#   with element names as hooks to program against.
+# - Added configLayout function to autopopulate elements of the map layout which include:
+#    - Farm Number
+#    - Tract Number
+#    - Customer Name (from parameter inputs)
+#    - County Name (Actual tract location; not administrative county)
+#    - State (Postal Code) (Actual tract location; not administrative state)
+# - Updated populateForm function:
+#    - Request From field's default entry changed to "FSA", per Jason Outlaw.
+#    - Default remarks statement changed, per Jason Outlaw, and lengthened to 255 characters
+#    - Customer Name input parameter is output to the First Name parameter for the time being.
+#    - Increased First Name field length to 50.
+# - Disabled Snap Raster for release version 1. Need to fix in future versions. See notes by
+#   env.snapRaster.
 
 #-------------------------------------------------------------------------------
 
@@ -866,7 +892,7 @@ def extractDEM(inputDEM,zUnits):
 
     except:
         errorMsg()
-        return False,False
+        return False,False,False
 
 ## ================================================================================================================
 def removeScratchLayers():
@@ -1083,10 +1109,11 @@ def populateForm():
             state = getpass.getuser().replace('.',' ').replace('\'','')
 
         # Add 18 Fields to the fieldDetermination feature class
+        remarks_txt = r'This Highly Erodible Land determination was conducted offsite using the soil survey. If PHEL soil map units were present, they may have been evaluated using elevation data.'
         fieldDict = {"Signature":("TEXT",dcSignature,50),"SoilAvailable":("TEXT","Yes",5),"Completion":("TEXT","Office",10),
-                        "SodbustField":("TEXT","No",5),"Delivery":("TEXT","Mail",10),"Remarks":("TEXT","",110),
-                        "RequestDate":("DATE",""),"LastName":("TEXT","",50),"FirstName":("TEXT","",25),"Address":("TEXT","",50),
-                        "City":("TEXT","",25),"ZipCode":("TEXT","",10),"Request_from":("TEXT","Landowner",15),"HELFarm":("TEXT","Yes",5),
+                        "SodbustField":("TEXT","No",5),"Delivery":("TEXT","Mail",10),"Remarks":("TEXT",remarks_txt,255),
+                        "RequestDate":("DATE",""),"LastName":("TEXT","",50),"FirstName":("TEXT",input_cust,50),"Address":("TEXT","",50),
+                        "City":("TEXT","",25),"ZipCode":("TEXT","",10),"Request_from":("TEXT","FSA",15),"HELFarm":("TEXT","Yes",5),
                         "Determination_Date":("DATE",today),"state":("TEXT",state,2),"SodbustTract":("TEXT","No",5),"Lidar":("TEXT","Yes",5)}
 
         arcpy.SetProgressor("step", "Preparing and Populating NRCS-CPA-026e Form", 0, len(fieldDict), 1)
@@ -1127,6 +1154,95 @@ def populateForm():
         return False
         errorMsg()
 
+## ================================================================================================================
+def configLayout():
+    # This function will gather and update information for elements of the map layout
+
+    try:
+        # Confirm Map Doc existence
+        mxd = arcpy.mapping.MapDocument("CURRENT")
+
+        # Set starting variables as empty for logical comparison later on, prior to updating layout
+        farmNum = ''
+        trNum = ''
+        #input_cust comes from input parameters to tool in which this function was built
+        county = ''
+        state = ''
+
+        # end function if lookup table from tool parameters does not exist
+        if not arcpy.Exists(lu_table):
+            return False
+            
+        # Get CLU information from first row of the cluLayer.
+        # All CLU records should have this info, so break after one record.
+        with arcpy.da.SearchCursor(cluLayer, ['statecd','countycd','farmnbr','tractnbr']) as cursor:
+            for row in cursor:
+                stCD = row[0]
+                coCD = row[1]
+                farmNum = row[2]
+                trNum = row[3]
+                break
+
+        # Lookup state and county name
+        stco_code = str(stCD) + str(coCD)
+        #expression = (u'{} = ' + stco_code).format(arcpy.AddFieldDelimiters(lu_table, 'GEOID'))
+        expression = (u"{} = '" + stco_code + "'").format(arcpy.AddFieldDelimiters(lu_table, 'GEOID'))
+        with arcpy.da.SearchCursor(lu_table, ['GEOID','NAME','STPOSTAL'], where_clause=expression) as cursor:
+            for row in cursor:
+                county = row[1]
+                state = row[2]
+                # We should only get one result if using installed lookup table from US Census Tiger table, so break
+                break
+            
+        # Find and hook map layout elements to variables
+        for elm in arcpy.mapping.ListLayoutElements(mxd):
+            if elm.name == "farm_txt":
+                farm_ele = elm
+            if elm.name == "tract_txt":
+                tract_ele = elm
+            if elm.name == "customer_txt":
+                customer_ele = elm
+            if elm.name == "county_txt":
+                county_ele = elm
+            if elm.name == "state_txt":
+                state_ele = elm
+
+        # Configure the text boxes
+        # If any of the info is missing, the script still runs and boxes are reset to a manual entry prompt
+        if farmNum != '':
+            farm_ele.text = "Farm: " + str(farmNum)
+        else:
+            farm_ele.text = "Farm: <dbl-click to enter>"
+
+        if trNum != '':
+            tract_ele.text = "Tract: " + str(trNum)
+        else:
+            tract_ele.text = "Tract: <dbl-click to enter>"
+
+        if input_cust != '':
+            customer_ele.text = "Customer(s): " + str(input_cust)
+        else:
+            customer_ele.text = "Customer(s): <dbl-click to enter>"
+
+        if county != '':
+            county_ele.text = "County: " + str(county) + ", " + str(state)
+        else:
+            county_ele.text = "County: <dbl-click to enter>"
+
+#### State Text Box removed from layout to combine with the County text box for more consistent map header appearance ####
+##        if state != '':
+##            state_ele.text = "State: " + str(state)
+##        else:
+##            state_ele.text = "State: <dbl-click to enter>"
+
+        #Called by add map layers function - don't need to call it again here
+        #arcpy.RefreshActiveView()
+
+        return True
+
+    except:
+        return False
+    
 ## =========================================================== Main Body ========================================================
 import sys, string, os, traceback, re
 import arcpy, subprocess, getpass, time
@@ -1141,6 +1257,8 @@ if __name__ == '__main__':
         inputDEM = arcpy.GetParameter(2)
         zUnits = arcpy.GetParameterAsText(3)
         dcSignature = arcpy.GetParameterAsText(4)
+        input_cust = arcpy.GetParameterAsText(5)
+        # 8/20/2019 - Observation: stateThreshold is not used anywhere in the code...?
         stateThreshold = 50
 
         kFactorFld = "K"
@@ -1158,6 +1276,8 @@ if __name__ == '__main__':
         if not arcpy.Exists(helDatabase):
             AddMsgAndPrint("\nHEL Access Database does not exist in the same path as HEL Tools",2)
             sys.exit()
+        # Also define the lu_table, but it's still ok to continue if it's not present
+        lu_table = os.path.dirname(sys.argv[0]) + os.sep + r'census_fips_lut.dbf'
 
         #-------------------------------------------------------- Close Microsoft Access Database software if it is open.
 ##        tasks = os.popen('tasklist /v').read().strip().split('\n')
@@ -1283,6 +1403,9 @@ if __name__ == '__main__':
         # Create Text file to log info to
         textFilePath = createTextFile(uniqueTracts[0],uniqueFarm[0],uniqueFields)
         bLog = True
+
+        # Update the map layout for the current site being run
+        configLayout()
 
         AddMsgAndPrint("\nNumber of CLU fields selected: {}".format(len(cluDesc.FIDset.split(";"))))
 
@@ -1452,9 +1575,9 @@ if __name__ == '__main__':
         pivotFields = [fld.name for fld in arcpy.ListFields(ogHelSummaryStatsPivot)][1:]  # ['CLUNBR','HEL','NHEL','PHEL']
         numOfhelValues = len(pivotFields)                                                 # Number of Pivot table fields; Min 2 fields
         maxAcreLength.sort(reverse=True)
-        bSkipGeoprocessing = True             # Skip processing until a field is neither HEL >= 33.33% or NHEL > 66.6%
+        bSkipGeoprocessing = True             # Skip processing until a field is neither HEL >= 33.33% or NHEL > 66.67%
 
-        # This dictionary will only be used if FINAl results are all HEL or all NHEL to reference original
+        # This dictionary will only be used if FINAL results are all HEL or all NHEL to reference original
         # acres and not use tabulate area acres.  It will also be used when there are no PHEL Values.
         # {cluNumber:(HEL value, cluAcres, HEL Pct} -- HEL value is determined by the 33.33% or 50 acre rule
         ogCLUinfoDict = dict()
@@ -1487,14 +1610,14 @@ if __name__ == '__main__':
                     if og_cluHELrating == None:
 
                         # Set field to HEL
-                        if pivotFields[i] == "HEL" and (pct >= 33.3 or acres >= 50):
+                        if pivotFields[i] == "HEL" and (pct >= 33.33 or acres >= 50):
                             og_cluHELrating = "HEL"
                             if not row[0] in ogCLUinfoDict:
                                 ogCLUinfoDict[row[0]] = (og_cluHELrating,cluAcres,pct)
                             bHELgreaterthan33 = True
 
                         # Set field to NHEL
-                        elif pivotFields[i] == "NHEL" and pct > 66.66:
+                        elif pivotFields[i] == "NHEL" and pct > 66.67:
                             bNHELgreaterthan66 = True
                             og_cluHELrating = "NHEL"
 
@@ -1519,7 +1642,7 @@ if __name__ == '__main__':
                     #AddMsgAndPrint("\t\t\t" + pivotFields[i] + firstSpace + " -- " + str(acres) + secondSpace + " .ac -- " + str(pct) + " %")
                     del acres,pct,firstSpace,secondSpace
 
-                # Skip geoprocessing if HEL >=33.33% or NHEL > 66.6%
+                # Skip geoprocessing if HEL >=33.33% or NHEL > 66.67%
                 if bSkipGeoprocessing:
                    if not bHELgreaterthan33 and not bNHELgreaterthan66:
                       bSkipGeoprocessing = False
@@ -1550,7 +1673,7 @@ if __name__ == '__main__':
             # Only Print this if there are PHEL values but they don't need
             # to be processed; Otherwise it should be captured by above statement.
             if bSkipGeoprocessing and not bNoPHELvalues:
-               AddMsgAndPrint("\n\tHEL values are >= 33.33% or NHEL values > 66.66%",1)
+               AddMsgAndPrint("\n\tHEL values are >= 33.33% or NHEL values > 66.67%",1)
                AddMsgAndPrint("\tNo Geoprocessing is required.\n")
 
             AddLayersToArcMap()
@@ -1579,29 +1702,58 @@ if __name__ == '__main__':
            sys.exit()
         scratchLayers.append(dem)
 
-        ### ----------------------------------------------------------------------------------------------------------------------------- Set Snap Raster
-        arcpy.env.snapRaster = dem
+        ### ----------------------------------------------------------------------------------------------------------------------------- Set Snap Raster 
+        # Disabled for now due to shifting soils results.
+        # Needs to be changed so that soil derived rasters exist first and are the snap rasters
+        #arcpy.env.snapRaster = dem
 
         ### -------------------------------------------------------------------------------------------------------------------------- Create Slope Layer
+        # Perform a minor fill to reduce LiDAR data noise and minor irregularities. Try to use a max fill height of no more than 1 foot, based on input zUnits.
+        arcpy.SetProgressorLabel("Filling small sinks in DEM")
+        AddMsgAndPrint("\nFilling small sinks in DEM")
+        if zUnits == "Feet":
+            zLimit = 1
+        elif zUnits == "Meters":
+            zLimit = 0.3048
+        elif zUnits == "Inches":
+            zLimit = 12
+        elif zUnits == "Centimeters":
+            zLimit = 30.48
+        else:
+            # Assume worst case z units of Meters
+            zLimit = 0.3048
+
+        # Perform the fill using the zLimit as the max fill amount
+        filled = Fill(dem, zLimit)
+        scratchLayers.append(filled)
+
+        # Run a FocalMean to smooth the DEM of LiDAR data noise. This should be run prior to creating derivative products.
+        # This replaces running FocalMean on the slope layer itself.
+        arcpy.SetProgressorLabel("Running Focal Statistics on DEM")
+        AddMsgAndPrint("Running Focal Statistics on DEM")
+        #slope = arcpy.CreateScratchName("focStatsMean_Slope",data_type="RasterDataset",workspace=scratchWS)
+        preslope = FocalStatistics(filled, NbrRectangle(3,3,"CELL"),"MEAN","DATA")
+        #outFocalStatistics.save(slope)
+
         arcpy.SetProgressorLabel("Creating Slope Derivative")
         AddMsgAndPrint("\nCreating Slope Derivative")
         #preslope = arcpy.CreateScratchName("preslope",data_type="RasterDataset",workspace=scratchWS)
-        preslope = Slope(dem,"PERCENT_RISE",zFactor)
+        slope = Slope(preslope,"PERCENT_RISE",zFactor)
         #outSlope.save(preslope)
-        scratchLayers.append(preslope)
 
-        # Run a FocalMean statistics on slope output
-        arcpy.SetProgressorLabel("Running Focal Statistics on Slope Percent")
-        AddMsgAndPrint("Running Focal Statistics on Slope Percent")
-        #slope = arcpy.CreateScratchName("focStatsMean_Slope",data_type="RasterDataset",workspace=scratchWS)
-        slope = FocalStatistics(preslope, NbrRectangle(3,3,"CELL"),"MEAN","DATA")
-        #outFocalStatistics.save(slope)
+##        # Run a FocalMean statistics on slope output
+##        arcpy.SetProgressorLabel("Running Focal Statistics on Slope Percent")
+##        AddMsgAndPrint("Running Focal Statistics on Slope Percent")
+##        #slope = arcpy.CreateScratchName("focStatsMean_Slope",data_type="RasterDataset",workspace=scratchWS)
+##        slope = FocalStatistics(preslope, NbrRectangle(3,3,"CELL"),"MEAN","DATA")
+##        #outFocalStatistics.save(slope)
 
         ### ------------------------------------------------------------------------------------------------------------ Create Flow Direction and Flow Length
         arcpy.SetProgressorLabel("Calculating Flow Direction")
         AddMsgAndPrint("Calculating Flow Direction")
         #flowDirection = arcpy.CreateScratchName("flowDirection",data_type="RasterDataset",workspace=scratchWS)
-        flowDirection = FlowDirection(dem, "FORCE")
+        #flowDirection = FlowDirection(dem, "FORCE")
+        flowDirection = FlowDirection(preslope, "FORCE")
         #outFlowDirection.save(flowDirection)
         scratchLayers.append(flowDirection)
 
@@ -1648,7 +1800,7 @@ if __name__ == '__main__':
         # Convert slope percent to radians
         radians = ATan(Times(slope,0.01))
         scratchLayers.append(radians)
-
+        
         # Compute S factor using formula in AH537, pg 12
         sFactor = ((Power(Sin(radians),2)*65.41)+(Sin(radians)*4.56)+(0.065))
         scratchLayers.append(sFactor)
@@ -1967,7 +2119,7 @@ if __name__ == '__main__':
             AddMsgAndPrint("\nFailed to correclty populate NRCS-CPA-026e form",2)
 
         # Clean up time
-        #removeScratchLayers()
+        removeScratchLayers()
         arcpy.SetProgressorLabel("")
         AddMsgAndPrint("\n")
         arcpy.RefreshCatalog(scratchWS)
