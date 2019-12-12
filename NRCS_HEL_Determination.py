@@ -23,6 +23,11 @@
 # e-mail: chris.morse@usda.gov
 # phone: 317-295-5849
 
+# Contributor: Edwin Muniz
+#               NJ Assistant State Soil Scientist
+# e-mail: edwin.muniz@usda.gov
+# phone: 732-537-6062
+
 # ==========================================================================================
 # Modified 10/24/2016
 # Line 705; outflowLengthFT was added to the scratchLayers to be deleted.  It should've
@@ -278,6 +283,13 @@
 #    - Increased First Name field length to 50.
 # - Disabled Snap Raster for release version 1. Need to fix in future versions. See notes by
 #   env.snapRaster.
+
+# Updated 9/16/2019, C.M.
+# -Added alternate equation for regions of the northwestern US that need a special LS equation
+#  that is used for HEL determinations involving runoff on partially frozen soil.
+# -Updated HEL Determination Tool validations to better handle automatic DEM and units assignment.
+# -Fixed a crash in the extractDEMfromImageService function related to variables and returns.
+#  The direct use of NRCS Web Service DEMs is working again without need for the download utility.
 
 #-------------------------------------------------------------------------------
 
@@ -776,8 +788,8 @@ def extractDEM(inputDEM,zUnits):
 
         if desc.format == 'Image Service':
             if sr.Type == "Geographic":
-                newZfactor,demExtract = extractDEMfromImageService(inputDEM,zUnits)
-                return newZfactor,demExtract
+                newLinearUnits,newZfactor,demExtract = extractDEMfromImageService(inputDEM,zUnits)
+                return newLinearUnits,newZfactor,demExtract
             bImageService = True
 
         # ------------------------------------------------------------------------------------ Check DEM properties
@@ -1229,15 +1241,6 @@ def configLayout():
         else:
             county_ele.text = "County: <dbl-click to enter>"
 
-#### State Text Box removed from layout to combine with the County text box for more consistent map header appearance ####
-##        if state != '':
-##            state_ele.text = "State: " + str(state)
-##        else:
-##            state_ele.text = "State: <dbl-click to enter>"
-
-        #Called by add map layers function - don't need to call it again here
-        #arcpy.RefreshActiveView()
-
         return True
 
     except:
@@ -1258,8 +1261,12 @@ if __name__ == '__main__':
         zUnits = arcpy.GetParameterAsText(3)
         dcSignature = arcpy.GetParameterAsText(4)
         input_cust = arcpy.GetParameterAsText(5)
-        # 8/20/2019 - Observation: stateThreshold is not used anywhere in the code...?
-        stateThreshold = 50
+        use_runoff_ls = arcpy.GetParameter(6)
+        #use_runoff_ls = False      ## Used for testing when not set as a parameter
+        
+        ## 8/20/2019 - Observation: stateThreshold is not used anywhere in the code. Was intended as a PHEL predominance % paramter.
+        ##Commenting it out for now.
+        #stateThreshold = 50
 
         kFactorFld = "K"
         tFactorFld = "T"
@@ -1704,11 +1711,12 @@ if __name__ == '__main__':
 
         ### ----------------------------------------------------------------------------------------------------------------------------- Set Snap Raster 
         # Disabled for now due to shifting soils results.
-        # Needs to be changed so that soil derived rasters exist first and are the snap rasters
+        # Investigating change so that soil derived rasters exist first and are the snap rasters (9/16/2019)
         #arcpy.env.snapRaster = dem
 
         ### -------------------------------------------------------------------------------------------------------------------------- Create Slope Layer
-        # Perform a minor fill to reduce LiDAR data noise and minor irregularities. Try to use a max fill height of no more than 1 foot, based on input zUnits.
+        # Perform a minor fill to reduce LiDAR data noise and minor irregularities.
+        # Try to use a max fill height of no more than 1 foot, based on input zUnits.
         arcpy.SetProgressorLabel("Filling small sinks in DEM")
         AddMsgAndPrint("\nFilling small sinks in DEM")
         if zUnits == "Feet":
@@ -1741,13 +1749,15 @@ if __name__ == '__main__':
         slope = Slope(preslope,"PERCENT_RISE",zFactor)
         #outSlope.save(preslope)
 
+###### REMOVED IN FAVOR OF FOCAL MEAN ON DEM PRIOR TO RUNNING SLOPE ######
 ##        # Run a FocalMean statistics on slope output
 ##        arcpy.SetProgressorLabel("Running Focal Statistics on Slope Percent")
 ##        AddMsgAndPrint("Running Focal Statistics on Slope Percent")
 ##        #slope = arcpy.CreateScratchName("focStatsMean_Slope",data_type="RasterDataset",workspace=scratchWS)
 ##        slope = FocalStatistics(preslope, NbrRectangle(3,3,"CELL"),"MEAN","DATA")
 ##        #outFocalStatistics.save(slope)
-
+###### REMOVED IN FAVOR OF FOCAL MEAN ON DEM PRIOR TO RUNNING SLOPE ######
+        
         ### ------------------------------------------------------------------------------------------------------------ Create Flow Direction and Flow Length
         arcpy.SetProgressorLabel("Calculating Flow Direction")
         AddMsgAndPrint("Calculating Flow Direction")
@@ -1788,57 +1798,56 @@ if __name__ == '__main__':
             scratchLayers.append(flowLengthFT)
 
         ### --------------------------------------------------------------------------------------------------------------- Calculate LS Factor
-        # ------------------------------------------------------------------------------- Calculate S Factor
-        # ((0.065 +( 0.0456 * ("%slope%"))) +( 0.006541 * (Power("%slope%",2))))
-        arcpy.SetProgressorLabel("Calculating S Factor")
-        AddMsgAndPrint("\nCalculating S Factor")
-        #sFactor = arcpy.CreateScratchName("sFactor",data_type="RasterDataset",workspace=scratchWS)
-        #outsFactor = (Power(Raster(slope),2) * 0.006541) + ((Raster(slope) * 0.0456) + 0.065)       ## Original Line
-        #sFactor = (Power(slope,2) * 0.006541) + ((slope * 0.0456) + 0.065)
-        #outsFactor.save(sFactor)
-
-        # Convert slope percent to radians
-        radians = ATan(Times(slope,0.01))
-        scratchLayers.append(radians)
         
-        # Compute S factor using formula in AH537, pg 12
-        sFactor = ((Power(Sin(radians),2)*65.41)+(Sin(radians)*4.56)+(0.065))
-        scratchLayers.append(sFactor)
+        # Convert slope percent to radians for use in various LS equations
+        radians = ATan(Times(slope,0.01))
 
-        # ------------------------------------------------------------------------------ Calculate L Factor
-        # Con("%slope%" < 1,Power("%FlowLenft%" / 72.5,0.2) ,Con(("%slope%" >=  1) &("%slope%" < 3) ,Power("%FlowLenft%" / 72.5,0.3), Con(("%slope%" >= 3) &("%slope%" < 5 ),Power("%FlowLenft%" / 72.5,0.4) ,Power("%FlowLenft%" / 72.5,0.5))))
-        # 1) slope < 1      --  Power 0.2
-        # 2) 1 < slope < 3  --  Power 0.3
-        # 3) 3 < slope < 5  --  Power 0.4
-        # 4) slope > 5      --  Power 0.5
+        # ----------------------------------------------------------------------------- Compute LS Factor
+        # If Northwest US 'Use Runoff LS Equation' flag was active, use the following equation
+        if use_runoff_ls:
+            arcpy.SetProgressorLabel("Calculating LS Factor")
+            AddMsgAndPrint("Calculating LS Factor")
+            lsFactor = (Power((flowLengthFt/72.6)*Cos(radians),0.5))*(Power(Sin((radians))/(Sin(5.143*((math.pi)/180))),0.7))
 
-        arcpy.SetProgressorLabel("Calculating L Factor")
-        AddMsgAndPrint("Calculating L Factor")
-        #lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
+        # Otherwise, use the standard AH537 LS computation
+        else:
+            # ------------------------------------------------------------------------------- Calculate S Factor
+            arcpy.SetProgressorLabel("Calculating S Factor")
+            AddMsgAndPrint("\nCalculating S Factor")
+            # Compute S factor using formula in AH537, pg 12
+            sFactor = ((Power(Sin(radians),2)*65.41)+(Sin(radians)*4.56)+(0.065))
+            scratchLayers.append(sFactor)
 
-        # Original outlFactor lines
-        """outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.2),
-                           Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.3),
-                           Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.4),
-                           Power(Raster(flowLengthFT) / 72.6,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")"""
+            # ------------------------------------------------------------------------------ Calculate L Factor
+            arcpy.SetProgressorLabel("Calculating L Factor")
+            AddMsgAndPrint("Calculating L Factor")
+            #lFactor = arcpy.CreateScratchName("lFactor",data_type="RasterDataset",workspace=scratchWS)
 
-        # Remove 'Raster' function from above
-        lFactor = Con(slope,Power(flowLengthFT / 72.6,0.2),
-                        Con(slope,Power(flowLengthFT / 72.6,0.3),
-                        Con(slope,Power(flowLengthFT / 72.6,0.4),
-                        Power(flowLengthFT / 72.6,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
+            # Original outlFactor lines
+            """outlFactor = Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.2),
+                               Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.3),
+                               Con(Raster(slope),Power(Raster(flowLengthFT) / 72.6,0.4),
+                               Power(Raster(flowLengthFT) / 72.6,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")"""
 
-        #outlFactor.save(lFactor)
-        scratchLayers.append(lFactor)
+            # Remove 'Raster' function from above
+            lFactor = Con(slope,Power(flowLengthFT / 72.6,0.2),
+                            Con(slope,Power(flowLengthFT / 72.6,0.3),
+                            Con(slope,Power(flowLengthFT / 72.6,0.4),
+                            Power(flowLengthFT / 72.6,0.5),"VALUE >= 3 AND VALUE < 5"),"VALUE >= 1 AND VALUE < 3"),"VALUE<1")
 
-        # ----------------------------------------------------------------------------- Calculate LS Factor
-        # "%l_factor%" * "%s_factor%"
-        arcpy.SetProgressorLabel("Calculating LS Factor")
-        AddMsgAndPrint("Calculating LS Factor")
-        #lsFactor = arcpy.CreateScratchName("lsFactor",data_type="RasterDataset",workspace=scratchWS)
-        #outlsFactor = Raster(lFactor) * Raster(sFactor)  ## Original Line
-        lsFactor = lFactor * sFactor
-        #outlsFactor.save(lsFactor)
+            #outlFactor.save(lFactor)
+            scratchLayers.append(lFactor)
+
+            # ----------------------------------------------------------------------------- Calculate LS Factor
+            # "%l_factor%" * "%s_factor%"
+            arcpy.SetProgressorLabel("Calculating LS Factor")
+            AddMsgAndPrint("Calculating LS Factor")
+            #lsFactor = arcpy.CreateScratchName("lsFactor",data_type="RasterDataset",workspace=scratchWS)
+            #outlsFactor = Raster(lFactor) * Raster(sFactor)  ## Original Line
+            lsFactor = lFactor * sFactor
+            #outlsFactor.save(lsFactor)            
+
+        scratchLayers.append(radians)
         scratchLayers.append(lsFactor)
 
         ### ------------------------------------------------------------------------------------------------------------- Convert K,T & R Factor and HEL Value to Rasters
@@ -1851,7 +1860,7 @@ if __name__ == '__main__':
 ##        rFactor =  "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS))
 ##        helValue = "in_memory" + os.sep + os.path.basename(arcpy.CreateScratchName("helValue",data_type="RasterDataset",workspace=scratchWS))
 
-        # This works in 10.6.1 but slows processing
+        # This works in 10.5 AND works in 10.6.1 and 10.7 but slows processing
         kFactor = arcpy.CreateScratchName("kFactor",data_type="RasterDataset",workspace=scratchWS)
         tFactor = arcpy.CreateScratchName("tFactor",data_type="RasterDataset",workspace=scratchWS)
         rFactor = arcpy.CreateScratchName("rFactor",data_type="RasterDataset",workspace=scratchWS)
@@ -1889,7 +1898,6 @@ if __name__ == '__main__':
         scratchLayers.append(eiFactor)
 
         ### ------------------------------------------------------------------------------------------------------------- Calculate Final HEL Factor
-        # Con("%hel_factor%"==0,"%EI_grid%",Con("%hel_factor%"==1,9,Con("%hel_factor%"==2,2)))
         # Create Conditional statement to reflect the following:
         # 1) PHEL Value = 0 -- Take EI factor -- Depends     2
         # 2) HEL Value  = 1 -- Assign 9                      0
