@@ -382,9 +382,14 @@ def createTextFile(Tract,Farm,cluList):
         if not os.path.isdir(helTextNotesDir):
            os.makedirs(helTextNotesDir)
 
+##        # name was too long when using numerous fields in the name
+##        textFileName = "NRCS_HEL_Determination_TRACT(" + str(Tract) + ")_FARM(" + str(Farm) \
+##                        + ")_CLU(" + str(cluList).replace('[','').replace(']','').replace(' ','') \
+##                        + ").txt"
+
         textFileName = "NRCS_HEL_Determination_TRACT(" + str(Tract) + ")_FARM(" + str(Farm) \
-                        + ")_CLU(" + str(cluList).replace('[','').replace(']','').replace(' ','') \
                         + ").txt"
+        
         textPath = helTextNotesDir + os.sep + textFileName
 
         # Version check
@@ -1421,6 +1426,10 @@ if __name__ == '__main__':
         if not len(arcpy.ListFields(fieldDetermination,calcAcreFld)) > 0:
             arcpy.AddField_management(fieldDetermination,calcAcreFld,"DOUBLE")
 
+        # Note: FSA MIDAS uses "square meters * 0.0002471" based on NAD 83 for the current UTM Zone and then rounds to two decimal points to set its calc acres.
+        # If we changed all calc acres formulas to match FSA's formula, we would have matching FSA acres, but slightly incorrect amounts.
+        # The variance is approximately two hundred thouandths of an acre or about 3/10ths of a square inch per acre.
+        # If we set all internal acres computations to 2 decimal places from rounding based on the above, all acres would be consistent, except possibly for raster derived acres (need to check).
         arcpy.CalculateField_management(fieldDetermination,calcAcreFld,"!shape.area@acres!","PYTHON_9.3")
         totalAcres = float("%.1f" % (sum([row[0] for row in arcpy.da.SearchCursor(fieldDetermination, (calcAcreFld))])))
         AddMsgAndPrint("\tTotal Acres: " + splitThousands(totalAcres))
@@ -1462,9 +1471,10 @@ if __name__ == '__main__':
         scratchLayers.append(cluHELintersect_pre)
 
         # Test intersection --- Should we check the percentage of intersection here? what if only 50% overlap
+        # No modification needed for these acres. The total is used only for this check.
         totalIntAcres = sum([row[0] for row in arcpy.da.SearchCursor(finalHELSummary, ("SHAPE@AREA"))]) / acreConversionDict.get(arcpy.Describe(finalHELSummary).SpatialReference.LinearUnitName)
         if not totalIntAcres:
-            AddMsgAndPrint("\tThere is no overlap between hel layer and CLU Layer. EXITTING!",2)
+            AddMsgAndPrint("\tThere is no overlap between HEL soil layer and CLU Layer. EXITTING!",2)
             removeScratchLayers()
             sys.exit()
 
@@ -1520,6 +1530,8 @@ if __name__ == '__main__':
                         wrongHELvalues.append(str(row[0]))
 
                 # Update Acre field
+                # Here we calculated acres differently than we did than when we updated the calc acres in the field determination layer. Seems like we could be consistent here.
+                # Differences may be inconsequential if our decimal places match ArcMap's and everything is consistent for coordinate systems for the layers.
                 #acres = float("%.1f" % (row[3] / acreConversionDict.get(arcpy.Describe(helSummary).SpatialReference.LinearUnitName)))
                 acres = row[4] / acreConversionDict.get(arcpy.Describe(helSummary).SpatialReference.LinearUnitName)
                 row[2] = acres
@@ -1807,7 +1819,7 @@ if __name__ == '__main__':
         if use_runoff_ls:
             arcpy.SetProgressorLabel("Calculating LS Factor")
             AddMsgAndPrint("Calculating LS Factor")
-            lsFactor = (Power((flowLengthFt/72.6)*Cos(radians),0.5))*(Power(Sin((radians))/(Sin(5.143*((math.pi)/180))),0.7))
+            lsFactor = (Power((flowLengthFT/72.6)*Cos(radians),0.5))*(Power(Sin((radians))/(Sin(5.143*((math.pi)/180))),0.7))
 
         # Otherwise, use the standard AH537 LS computation
         else:
